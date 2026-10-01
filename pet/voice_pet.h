@@ -150,6 +150,7 @@ void b64OutPush(ClientT& client, const char* g) {
   if (b64OutLen + 4 > sizeof(b64Out)) {
     client.write((const uint8_t*)b64Out, b64OutLen);
     b64OutLen = 0;
+    petAnimTick();  // 每写出 1KB 让动画走一帧
   }
   memcpy(b64Out + b64OutLen, g, 4);
   b64OutLen += 4;
@@ -238,6 +239,7 @@ bool readHttpBody(ClientT& client, String& body, uint32_t maxWaitMs, const char*
     }
     if (payload.length() > 0 && millis() - lastGrowth > 3000) break;  // 兜底
     if (millis() - start > maxWaitMs) break;
+    petAnimTick();
     delay(5);
   }
   if (!keepOpen || hs != HTTP_DONE) client.stop();
@@ -275,7 +277,10 @@ bool wifiPetConnected(int attempts = 3) {
     const unsigned long start = millis();
     while (WiFi.status() != WL_CONNECTED) {
       if (millis() - start > 15000) break;
-      delay(500);
+      for (int k = 0; k < 50; k++) {  // 等 500ms,期间动画照常
+        petAnimTick();
+        delay(10);
+      }
     }
     if (WiFi.status() == WL_CONNECTED) {
       Serial.print("V: wifi OK ip=");
