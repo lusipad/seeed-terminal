@@ -25,11 +25,20 @@ void beep(int freq, int dur) {
 // 状态机
 // ============================================================
 
-enum PetState { ST_IDLE, ST_RECORD, ST_THINK, ST_SHOW };
+enum PetState { ST_IDLE, ST_RECORD, ST_THINK, ST_SHOW, ST_SLEEP };
 PetState state = ST_IDLE;
 unsigned long stateStart = 0;
 unsigned long showUntil = 0;
 uint32_t recSamples = 0;
+unsigned long lastInteract = 0;              // 最近一次有人互动(按键/摸头/拿起)
+const unsigned long PET_DROWSY_MS = 180000;  // 3 分钟没人理 → 犯困
+const unsigned long PET_SLEEP_MS = 300000;   // 5 分钟 → 睡觉
+const int PET_DIM_LEVEL = 40;                // 睡觉时背光 PWM(0-255)
+
+// 背光:若 LCD_BACKLIGHT 不支持 PWM,analogWrite 会退化成全亮/全灭 —— 需真机确认
+void setBacklight(bool dim) {
+  analogWrite(LCD_BACKLIGHT, dim ? PET_DIM_LEVEL : 255);
+}
 
 // Emotion(pet_logic.h)→ 表情;顺序必须与 enum Emotion 一致:开心 兴奋 惊讶 害羞 疑惑 难过
 const int EMO_FACE[6] = {F_HAPPY, F_EXCITED, F_SURPRISED, F_SHY, F_CONFUSED, F_SAD};
@@ -66,6 +75,26 @@ void enterShow(int face, const String& t1, uint16_t c1, const String& t2, uint32
   petAnimSet(A_EMOTE, face);
 }
 
+void enterSleep() {
+  Serial.println("P: sleep");
+  state = ST_SLEEP;
+  stateStart = millis();
+  drawPet(F_SLEEP);
+  petAnimSet(A_SLEEP);
+  setBacklight(true);
+}
+
+void wakeUp() {
+  Serial.println("P: wake");
+  setBacklight(false);
+  lastInteract = millis();
+  state = ST_IDLE;
+  stateStart = millis();
+  drawPet(F_SLEEP);
+  drawIdleHint();
+  petAnimSet(A_WAKE);  // 睁眼动画结束后自动转 A_IDLE
+}
+
 void setup() {
   pinMode(PIN_KEY_B, INPUT_PULLUP);
   pinMode(PIN_KEY_C, INPUT_PULLUP);
@@ -92,6 +121,7 @@ void setup() {
 #if PET_TEST_BAD_TOKEN
   baiduToken = "invalid_token_for_selftest_0000";
 #endif
+  lastInteract = millis();
   enterIdle();
 }
 
@@ -112,12 +142,25 @@ void loop() {
   petAnimTick();
   switch (state) {
     case ST_IDLE: {
+      const unsigned long idleFor = millis() - lastInteract;
+      if (idleFor > PET_SLEEP_MS) {
+        enterSleep();
+        break;
+      }
+      if (idleFor > PET_DROWSY_MS && petAnimCurrent() == A_IDLE) petAnimSet(A_DROWSY);
+      if (pressed(PIN_KEY_C)) {  // C 键:叫醒犯困的小维
+        lastInteract = millis();
+        petAnimSet(A_IDLE);
+        break;
+      }
       if (pressed(PIN_JOY_L) || pressed(PIN_JOY_R)) {  // 摸头
+        lastInteract = millis();
         beep(1568, 80);
         enterShow(F_HAPPY, "", TFT_BLACK, "", 1200);
         break;
       }
       if (pressed(PIN_KEY_B)) {
+        lastInteract = millis();
         petRecStart();
         state = ST_RECORD;
         stateStart = millis();
@@ -173,6 +216,14 @@ void loop() {
       if (millis() > showUntil || keyAfterGrace) {
         while (anyKeyDown()) petAnimTick();  // 等松手,避免同一次按键在待机里又触发
         enterIdle();
+      }
+      break;
+    }
+
+    case ST_SLEEP: {
+      if (anyKeyDown()) {
+        wakeUp();
+        while (anyKeyDown()) petAnimTick();  // 等松手,避免叫醒的那一下又触发录音
       }
       break;
     }
