@@ -8,6 +8,7 @@ AC="/c/Program Files/Arduino CLI/arduino-cli.exe"
 
 # 1. 清掉占用串口的残留进程
 powershell.exe -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='powershell.exe'\" | Where-Object { \$_.CommandLine -match 'COM3' -or \$_.CommandLine -match 'COM4' -or \$_.CommandLine -match 'SerialPort' } | Where-Object { \$_.ProcessId -ne \$PID } | ForEach-Object { 'KILL ' + \$_.ProcessId; Stop-Process -Id \$_.ProcessId -Force }" 2>&1 | head -4
+powershell.exe -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { \$_.CommandLine -match 'serial_log.py' } | ForEach-Object { 'KILL ' + \$_.ProcessId; Stop-Process -Id \$_.ProcessId -Force }" 2>&1 | head -4
 sleep 1
 
 # 2. 自动找板子的串口
@@ -21,20 +22,7 @@ if [ "$SKETCH" != "none" ]; then
   "$AC" upload -p "$PORT" --fqbn Seeeduino:samd:seeed_wio_terminal --build-path "build/$SKETCH" 2>&1 | grep -E "Verify successful|No device|error" | head -3
 fi
 
-# 4. 挂实时日志
+# 4. 挂实时日志(Python 逐行落盘;板子重启/USB 重枚举后自动重连)
 rm -f "$LOG"
-(powershell.exe -NoProfile -Command "
-\$log = \"\$env:TEMP\\wio_serial.log\"
-\$sp = New-Object System.IO.Ports.SerialPort
-\$sp.PortName = \"$PORT\"; \$sp.BaudRate = 115200; \$sp.DtrEnable = \$true; \$sp.RtsEnable = \$true
-\$sp.ReadTimeout = 400
-\$sp.Open()
-\$deadline = (Get-Date).AddSeconds($DUR)
-while ((Get-Date) -lt \$deadline) {
-  try {
-    \$line = \$sp.ReadLine()
-    if (\$line) { Add-Content -Path \$log -Value \$line.Trim() -Encoding UTF8 }
-  } catch [TimeoutException] {}
-}
-\$sp.Close()" > /dev/null 2>&1 &)
+(python tools/serial_log.py "$DUR" "$(cygpath -w "$LOG")" > /dev/null 2>&1 &)
 echo "logger armed (${DUR}s) -> $LOG"

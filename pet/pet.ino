@@ -154,7 +154,9 @@ void loop() {
     case ST_THINK: {
       // 识别 + 回答(阻塞数秒)
       String t, r, note;
+      const uint32_t tProc = millis();
       const bool ok = petProcessVoice(recSamples, t, r, note);
+      petPrintTiming(millis() - tProc);
       state = ST_SHOW;
       stateStart = millis();
       if (ok) {

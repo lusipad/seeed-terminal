@@ -31,6 +31,27 @@ const int PET_SILENCE_AVG = 400;   // 16bit 尺度:低于此视为静音(可调)
 const uint32_t PET_TRAILING_MS = 1300;  // 说完静音多久自动停
 const uint32_t PET_NO_SPEECH_MS = 8000;
 
+// 每轮对话各阶段耗时(ms);pet.ino 在每轮结束调用 petPrintTiming 打印 "T:" 行
+struct PetTiming { uint32_t net, upload, asr, llmConn, llm; };
+PetTiming petTm = {0, 0, 0, 0, 0};
+
+void petPrintTiming(uint32_t processMs) {
+  Serial.print("T: trail=");
+  Serial.print(PET_TRAILING_MS);
+  Serial.print(" net=");
+  Serial.print(petTm.net);
+  Serial.print(" upload=");
+  Serial.print(petTm.upload);
+  Serial.print(" asr=");
+  Serial.print(petTm.asr);
+  Serial.print(" llm_conn=");
+  Serial.print(petTm.llmConn);
+  Serial.print(" llm=");
+  Serial.print(petTm.llm);
+  Serial.print(" total=");
+  Serial.println(PET_TRAILING_MS + processMs);
+}
+
 mic_config_t mic_config{
   .channel_cnt = 1,
   .sampling_rate = PET_SAMPLE_RATE,
@@ -276,6 +297,8 @@ bool petProcessVoice(uint32_t samples, String& transcript, String& reply, String
   reply = "";
   note = "";
 
+  petTm = {0, 0, 0, 0, 0};
+  const uint32_t tNet = millis();
   if (!wifiPetConnected()) {
     note = "wifi failed";
     return false;
@@ -284,6 +307,8 @@ bool petProcessVoice(uint32_t samples, String& transcript, String& reply, String
     note = "baidu token failed";
     return false;
   }
+
+  petTm.net = millis() - tNet;
 
   // ASR 走 HTTP 明文(80 端口):板载 TLS 写入只有 ~5KB/s,上传大音频会被服务器掐线;
   // 明文 TCP 快数倍。令牌仍走 HTTPS,音频本身在家庭网络内明文传输(玩具可接受)。
@@ -327,11 +352,15 @@ bool petProcessVoice(uint32_t samples, String& transcript, String& reply, String
   b64Write(client, st, (const uint8_t*)(petPcm + lo), 2 * n);
   b64Flush(client, st);
   client.print(tail);
+  petTm.upload = millis() - upT;
   Serial.print("V: wav uploaded ms=");
-  Serial.println(millis() - upT);
+  Serial.println(petTm.upload);
 
   String asrBody;
-  if (!readHttpBody(client, asrBody, 60000, "asr")) {
+  const uint32_t tAsr = millis();
+  const bool asrOk = readHttpBody(client, asrBody, 60000, "asr");
+  petTm.asr = millis() - tAsr;
+  if (!asrOk) {
     note = "asr http error";
     return false;
   }
@@ -355,11 +384,14 @@ bool petProcessVoice(uint32_t samples, String& transcript, String& reply, String
     return true;  // 只识别,无回答
   }
 
+  const uint32_t tConn = millis();
   WiFiClientSecure client2;
   if (!client2.connect("api.deepseek.com", 443, 20000)) {
     note = "llm connect failed";
     return false;
   }
+  petTm.llmConn = millis() - tConn;
+  const uint32_t tLlm = millis();
   JsonDocument req2;
   req2["model"] = "deepseek-chat";
   JsonArray msgs = req2["messages"].to<JsonArray>();
@@ -386,7 +418,9 @@ bool petProcessVoice(uint32_t samples, String& transcript, String& reply, String
   client2.print(req2s);
 
   String llmBody;
-  if (!readHttpBody(client2, llmBody, 30000, "llm")) {
+  const bool llmOk = readHttpBody(client2, llmBody, 30000, "llm");
+  petTm.llm = millis() - tLlm;
+  if (!llmOk) {
     note = "llm http error";
     return false;
   }
