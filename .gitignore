@@ -1,0 +1,14 @@
+# 编译产物
+build/
+
+# 含密钥的本地配置,不要提交
+console/wifi_secrets.h
+pet/wifi_secrets.h
+host/config.json
+__pycache__/
+
+# 独立仓库 / 大体积工具 / 同步生成的拷贝
+game-console/
+tools/ambd_flash_tool/
+tests/pet_selftest/pet_logic.h
+.superpowers/

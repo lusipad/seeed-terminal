@@ -1,0 +1,74 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""从 HZK16.bin 生成板载中文字库 C 头文件:
+   - font_hz16.h  : 点阵数据(GB2312 区1-3 符号/全角标点 + 区16-55 一级汉字)
+   - font_index.h : UTF-8(3字节) -> GB2312(2字节) 索引,按 UTF-8 排序供二分查找
+   解码用 GBK 超集(让 — 等映射进区1),但只收录 HZK16 有字形的区。
+"""
+import os
+
+SRC = r"D:\Repos\seeed-terminal\tools\HZK16.bin"
+OUT_DIR = r"D:\Repos\seeed-terminal\console"
+
+data = open(SRC, "rb").read()
+assert len(data) == 261696, f"unexpected HZK16 size {len(data)}"
+
+# 嵌入的区:1(标点) 2(带圈符号) 3(全角ASCII/全角标点) 16-55(一级汉字)
+ZONES = [1, 2, 3] + list(range(16, 56))
+entries = []  # (utf8_bytes, gb_bytes)
+glyphs = bytearray()
+
+
+def blob_index(qu, wei):
+    """glyph 在生成 blob 中的序号(单位:32字节)"""
+    if qu in (1, 2, 3):
+        return (qu - 1) * 94 + (wei - 1)
+    return 94 * 3 + (qu - 16) * 94 + (wei - 1)
+
+
+for qu in ZONES:
+    for wei in range(1, 95):
+        gb = bytes([0xA0 + qu, 0xA0 + wei])
+        pos = blob_index(qu, wei) * 32
+        try:
+            ch = gb.decode("gbk")
+            u8 = ch.encode("utf-8")
+        except UnicodeDecodeError:
+            glyphs.extend(b"\x00" * 32)
+            continue
+        if len(u8) != 3:  # 个别 2 字节 UTF-8 字符会破坏定长索引,剔除
+            glyphs.extend(b"\x00" * 32)
+            continue
+        off = ((gb[0] - 0xA0 - 1) * 94 + (gb[1] - 0xA0 - 1)) * 32
+        entries.append((u8, gb))
+        glyphs.extend(data[off:off + 32])
+
+entries.sort(key=lambda e: e[0])
+
+# ---- font_hz16.h ----
+with open(os.path.join(OUT_DIR, "font_hz16.h"), "w") as f:
+    f.write("// 自动生成:HZK16 子集(GB2312 区1-3 符号/全角标点 + 区16-55 一级汉字),勿手改\n")
+    f.write("#pragma once\n#include <stdint.h>\n\n")
+    f.write(f"#define HZ16_GLYPH_COUNT {len(glyphs) // 32}\n")
+    f.write("// 索引: qu 1-3 -> (qu-1)*94 + (wei-1); 16<=qu<=55 -> 282 + (qu-16)*94 + (wei-1) (单位:32字节)\n")
+    f.write("const uint8_t HZ16_FONT[] = {\n")
+    for i in range(0, len(glyphs), 16):
+        f.write("  " + ",".join(f"0x{b:02X}" for b in glyphs[i:i + 16]) + ",\n")
+    f.write("};\n")
+print("font_hz16.h:", len(glyphs), "bytes,", len(glyphs) // 32, "glyphs")
+
+# ---- font_index.h ----
+with open(os.path.join(OUT_DIR, "font_index.h"), "w") as f:
+    f.write("// 自动生成:UTF-8 -> GB2312 索引(按 UTF-8 排序,二分查找),勿手改\n")
+    f.write("#pragma once\n#include <stdint.h>\n\n")
+    f.write(f"#define HZ16_INDEX_COUNT {len(entries)}\n")
+    f.write("// 每项 5 字节: utf8[0..2] + gb[0] + gb[1]\n")
+    f.write("const uint8_t HZ16_INDEX[] = {\n")
+    flat = bytearray()
+    for u8, gb in entries:
+        flat.extend(u8)
+        flat.extend(gb)
+    for i in range(0, len(flat), 15):
+        f.write("  " + ",".join(f"0x{b:02X}" for b in flat[i:i + 15]) + ",\n")
+    f.write("};\n")
+print("font_index.h:", len(entries), "entries,", len(flat), "bytes")
