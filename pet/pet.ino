@@ -31,6 +31,19 @@ unsigned long stateStart = 0;
 unsigned long showUntil = 0;
 uint32_t recSamples = 0;
 
+// Emotion(pet_logic.h)→ 表情;顺序必须与 enum Emotion 一致:开心 兴奋 惊讶 害羞 疑惑 难过
+const int EMO_FACE[6] = {F_HAPPY, F_EXCITED, F_SURPRISED, F_SHY, F_CONFUSED, F_SAD};
+
+// 把技术性 note 翻成小维口吻(原 note 仍显示在第二行,方便排查)
+String friendlyNote(const String& note) {
+  if (note.startsWith("wifi")) return "我连不上 WiFi 啦…";
+  if (note.startsWith("asr rejected")) return "没听清,再说一遍嘛~";
+  if (note.startsWith("asr")) return "耳朵(语音识别)出故障了";
+  if (note.startsWith("baidu")) return "语音服务登录失败了";
+  if (note.startsWith("llm")) return "脑袋(DeepSeek)卡住了";
+  return "出了点小状况";
+}
+
 void drawIdleHint() {
   drawTextCJK("按一下 B 说话,说完我自己停", 62, 220, 320, TFT_DARKGREY);
 }
@@ -139,16 +152,18 @@ void loop() {
     case ST_THINK: {
       // 识别 + 回答(阻塞数秒;等待期间 petAnimTick 由网络循环驱动)
       String t, r, note;
+      int emo = EMO_HAPPY;
       const uint32_t tProc = millis();
-      const bool ok = petProcessVoice(recSamples, t, r, note);
+      const bool ok = petProcessVoice(recSamples, t, r, emo, note);
       petPrintTiming(millis() - tProc);
       if (ok) {
         beep(1319, 90);
-        enterShow(F_HAPPY, "你:" + t, 0x8410,
+        const int face = (emo >= 0 && emo < 6) ? EMO_FACE[emo] : F_HAPPY;
+        enterShow(face, "你:" + t, 0x8410,
                   r.length() ? "小维:" + r : String("(还没配置 DeepSeek Key,我不会说话呀)"), 15000);
       } else {
         beep(196, 250);
-        enterShow(F_SAD, "呜…出问题了", 0x8410, note, 15000);
+        enterShow(F_SAD, "呜…" + friendlyNote(note), 0x8410, note, 15000);
       }
       break;
     }

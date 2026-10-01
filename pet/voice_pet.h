@@ -326,8 +326,9 @@ void petNetWarmup() {
 }
 
 const char* const PET_SYSTEM_PROMPT =
-    "你是电子桌宠\"小维\",说话风格:活泼、简短、口语化。"
-    "用简体中文回答用户(45字以内),直接输出回答,不要任何前缀或解释。";
+    "你是电子桌宠\"小维\",性格活泼元气,说话简短、口语化、爱用感叹号。"
+    "回答必须以情绪标签开头,格式如 [开心],情绪只能从 开心/兴奋/惊讶/害羞/疑惑/难过 里选一个;"
+    "标签后直接是回答正文,用简体中文,45字以内,不要任何其他前缀或解释。";
 
 // 上传一次识别请求。返回百度 err_no;传输层失败返回 -1(note 填原因);响应缺 err_no 返回 -2
 int baiduAsrOnce(uint32_t lo, uint32_t n, String& transcript, String& note) {
@@ -388,7 +389,7 @@ int baiduAsrOnce(uint32_t lo, uint32_t n, String& transcript, String& note) {
 }
 
 // 问 DeepSeek,reply 为回答原文
-bool petAskLlm(const String& question, String& reply, String& note) {
+bool petAskLlm(const String& question, String& reply, int& emotion, String& note) {
   const uint32_t tConn = millis();
   WiFiClientSecure client2;
   if (!client2.connect("api.deepseek.com", 443, 20000)) {
@@ -435,7 +436,10 @@ bool petAskLlm(const String& question, String& reply, String& note) {
   reply = String(ldoc["choices"][0]["message"]["content"] | "");
   Serial.print("V: reply=");
   Serial.println(reply);
-  if (!reply.length()) {
+  size_t textStart = 0;
+  emotion = parseEmotionTag(reply.c_str(), reply.length(), &textStart);
+  reply = reply.substring(textStart);  // 标签不上屏
+  if (!reply.length()) {  // 空回复,或只给了标签没有正文
     note = "llm empty reply";
     return false;
   }
@@ -443,10 +447,11 @@ bool petAskLlm(const String& question, String& reply, String& note) {
 }
 
 // 识别 + 回答(阻塞,数秒):成功 true;transcript/reply/note 填充
-bool petProcessVoice(uint32_t samples, String& transcript, String& reply, String& note) {
+bool petProcessVoice(uint32_t samples, String& transcript, String& reply, int& emotion, String& note) {
   transcript = "";
   reply = "";
   note = "";
+  emotion = EMO_HAPPY;
   petTm = {0, 0, 0, 0, 0};
 
   const uint32_t tNet = millis();
@@ -491,7 +496,7 @@ bool petProcessVoice(uint32_t samples, String& transcript, String& reply, String
   if (strlen(DEEPSEEK_KEY) < 5) {
     return true;  // 只识别,无回答
   }
-  return petAskLlm(transcript, reply, note);
+  return petAskLlm(transcript, reply, emotion, note);
 }
 
 #endif  // PET_HAS_WIFI
