@@ -8,6 +8,7 @@
 #include <rpcWiFi.h>
 #include <rpcWiFiClientSecure.h>
 #include <ArduinoJson.h>
+#include "pet_logic.h"
 #include "wifi_secrets.h"
 #else
 #define PET_HAS_WIFI 0
@@ -28,7 +29,7 @@ volatile bool micDone = false;
 FilterBuHp micFilter;
 
 const int PET_SILENCE_AVG = 400;   // 16bit 尺度:低于此视为静音(可调)
-const uint32_t PET_TRAILING_MS = 1300;  // 说完静音多久自动停
+const uint32_t PET_TRAILING_MS = 900;  // 说完静音多久自动停(实测可调)
 const uint32_t PET_NO_SPEECH_MS = 8000;
 
 // 每轮对话各阶段耗时(ms);pet.ino 在每轮结束调用 petPrintTiming 打印 "T:" 行
@@ -206,21 +207,36 @@ void makeWavHeader(uint8_t h[44], uint32_t dataLen) {
   v = dataLen; memcpy(h + 40, &v, 4);
 }
 
+// 读一个 HTTP 响应:按 Content-Length / chunked 终止块判断收完立即返回;
+// 无长度信息或异常时退回"3 秒无新数据即收工"兜底。成功(200 且头完整)返回 true,body 为解码后的正文。
 template <typename ClientT>
-bool readHttpBody(ClientT& client, String& body, uint32_t maxWaitMs, const char* label) {
+bool readHttpBody(ClientT& client, String& body, uint32_t maxWaitMs, const char* label, bool keepOpen = false) {
   String payload;
   const unsigned long start = millis();
   size_t lastLen = 0;
   unsigned long lastGrowth = millis();
+  int hs = HTTP_NEED_MORE;
   while ((client.connected() || client.available()) && payload.length() < 16000) {
-    while (client.available()) payload += (char)client.read();
-    if (payload.length() != lastLen) { lastLen = payload.length(); lastGrowth = millis(); }
-    if (payload.length() > 0 && millis() - lastGrowth > 3000) break;  // 3s 无新数据即收工
+    bool got = false;
+    while (client.available()) {
+      payload += (char)client.read();
+      got = true;
+    }
+    if (got) {
+      hs = httpResponseState(payload.c_str(), payload.length());
+      if (hs == HTTP_DONE) break;  // 按协议收满,立即收工
+    }
+    if (payload.length() != lastLen) {
+      lastLen = payload.length();
+      lastGrowth = millis();
+    }
+    if (payload.length() > 0 && millis() - lastGrowth > 3000) break;  // 兜底
     if (millis() - start > maxWaitMs) break;
     delay(5);
   }
-  client.stop();
-  if (payload.length() && payload.indexOf("\r\n\r\n") < 0) {
+  if (!keepOpen || hs != HTTP_DONE) client.stop();
+  const long headerEnd = httpHeaderEnd(payload.c_str(), payload.length());
+  if (payload.length() && headerEnd < 0) {
     Serial.print("V: http raw=");
     Serial.println(payload.substring(0, 170));  // 不完整响应:原样打印排查
   }
@@ -229,23 +245,16 @@ bool readHttpBody(ClientT& client, String& body, uint32_t maxWaitMs, const char*
   Serial.print("] wait=");
   Serial.print(millis() - start);
   Serial.print("ms len=");
-  Serial.println(payload.length());
-  const int headerEnd = payload.indexOf("\r\n\r\n");
+  Serial.print(payload.length());
+  Serial.print(" done=");
+  Serial.println(hs);
   if (headerEnd < 0) return false;
   if (!payload.startsWith("HTTP/1.1 200") && !payload.startsWith("HTTP/1.0 200")) return false;
   body = payload.substring(headerEnd + 4);
-  if (payload.indexOf("chunked") >= 0) {
-    String decoded;
-    int pos = 0;
-    while (pos < (int)body.length()) {
-      const int lineEnd = body.indexOf("\r\n", pos);
-      if (lineEnd < 0) break;
-      const int chunkLen = (int)strtol(body.substring(pos, lineEnd).c_str(), NULL, 16);
-      if (chunkLen == 0) break;
-      decoded += body.substring(lineEnd + 2, lineEnd + 2 + chunkLen);
-      pos = lineEnd + 2 + chunkLen + 2;
-    }
-    body = decoded;
+  if (httpIsChunked(payload.c_str(), (size_t)headerEnd)) {
+    size_t decoded = 0;
+    if (!body.length() || !chunkedWalk(body.begin(), body.length(), body.begin(), &decoded)) return false;
+    body.remove(decoded);
   }
   return true;
 }
@@ -403,7 +412,7 @@ bool petProcessVoice(uint32_t samples, String& transcript, String& reply, String
   JsonObject user = msgs.add<JsonObject>();
   user["role"] = "user";
   user["content"] = transcript;
-  req2["max_tokens"] = 300;
+  req2["max_tokens"] = 120;  // 回答 45 字以内,够用且限制最坏耗时
 
   String body2;
   serializeJson(req2, body2);
