@@ -53,6 +53,29 @@ void testChunked() {
   check(!decodeEq("5\r\nhel", "hel"), "chunk: truncated is incomplete");
 }
 
+void emo(const char* s, int wantE, const char* wantText, const char* name) {
+  size_t ts = 999;
+  const int e = parseEmotionTag(s, strlen(s), &ts);
+  check(ts <= strlen(s) && e == wantE && strcmp(s + ts, wantText) == 0, name);
+}
+
+void testEmotion() {
+  emo("[开心]好呀", EMO_HAPPY, "好呀", "emo: happy");
+  emo("[兴奋]冲!", EMO_EXCITED, "冲!", "emo: excited");
+  emo("[惊讶]哇", EMO_SURPRISED, "哇", "emo: surprised");
+  emo("[害羞]嘿嘿", EMO_SHY, "嘿嘿", "emo: shy");
+  emo("[疑惑]嗯?", EMO_CONFUSED, "嗯?", "emo: confused");
+  emo("[难过]呜", EMO_SAD, "呜", "emo: sad");
+  emo("你好呀", EMO_HAPPY, "你好呀", "emo: no tag");
+  emo("[生气]哼", EMO_HAPPY, "[生气]哼", "emo: unknown tag kept");
+  emo("[开心哈哈", EMO_HAPPY, "[开心哈哈", "emo: no close bracket");
+  emo("[兴奋] 哇", EMO_EXCITED, "哇", "emo: space after tag");
+  emo("【惊讶】哇", EMO_SURPRISED, "哇", "emo: fullwidth brackets");
+  emo(" [害羞]嗯", EMO_SHY, "嗯", "emo: leading space");
+  emo("[开心]", EMO_HAPPY, "", "emo: tag only");
+  emo("", EMO_HAPPY, "", "emo: empty");
+}
+
 void printSummary() {
   Serial.print(failN ? "SELFTEST FAIL " : "SELFTEST PASS ");
   Serial.print(passN);
@@ -67,6 +90,7 @@ void setup() {
   delay(300);
   testHttp();
   testChunked();
+  testEmotion();
   printSummary();
 }
 

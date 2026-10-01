@@ -75,3 +75,35 @@ inline int httpResponseState(const char* buf, size_t n) {
   }
   return HTTP_NO_LENGTH;
 }
+
+enum Emotion { EMO_HAPPY = 0, EMO_EXCITED, EMO_SURPRISED, EMO_SHY, EMO_CONFUSED, EMO_SAD };
+
+// 解析回答开头的情绪标签:支持 [情绪] 与全角【情绪】,允许前导空白,剥掉标签及其后空白。
+// 无标签 / 不在白名单 / 缺右括号 → EMO_HAPPY,*textStart = 0(原文完整显示)
+inline int parseEmotionTag(const char* s, size_t n, size_t* textStart) {
+  *textStart = 0;
+  size_t b = 0;
+  while (b < n && (s[b] == ' ' || s[b] == '\t' || s[b] == '\r' || s[b] == '\n')) b++;
+  size_t open = 0;
+  if (b < n && s[b] == '[') open = 1;
+  else if (b + 3 <= n && memcmp(s + b, "\xE3\x80\x90", 3) == 0) open = 3;  // 【
+  if (!open) return EMO_HAPPY;
+  const size_t tagStart = b + open;
+  size_t close = 0, closeLen = 0;
+  for (size_t i = tagStart; i < n && i <= tagStart + 16; i++) {
+    if (s[i] == ']') { close = i; closeLen = 1; break; }
+    if (i + 3 <= n && memcmp(s + i, "\xE3\x80\x91", 3) == 0) { close = i; closeLen = 3; break; }  // 】
+  }
+  if (!closeLen) return EMO_HAPPY;
+  static const char* const NAMES[6] = {"开心", "兴奋", "惊讶", "害羞", "疑惑", "难过"};
+  const size_t tagLen = close - tagStart;
+  for (int e = 0; e < 6; e++) {
+    if (strlen(NAMES[e]) == tagLen && memcmp(s + tagStart, NAMES[e], tagLen) == 0) {
+      size_t p = close + closeLen;
+      while (p < n && (s[p] == ' ' || s[p] == '\t' || s[p] == '\r' || s[p] == '\n')) p++;
+      *textStart = p;
+      return e;
+    }
+  }
+  return EMO_HAPPY;
+}
