@@ -3,6 +3,12 @@
 //       由 pet.ino 轮询声能自动截断;识别百度,回答 DeepSeek,结果引用返回。
 
 #include <Arduino.h>
+#ifndef PET_TEST_OFFLINE
+#define PET_TEST_OFFLINE 0   // 1 = 开机预连直接失败(测试离线开机)
+#endif
+#ifndef PET_TEST_BAD_TOKEN
+#define PET_TEST_BAD_TOKEN 0 // 1 = 预连后把 token 改坏(测试失效自动重取)
+#endif
 #if __has_include("wifi_secrets.h")
 #define PET_HAS_WIFI 1
 #include <rpcWiFi.h>
@@ -259,12 +265,12 @@ bool readHttpBody(ClientT& client, String& body, uint32_t maxWaitMs, const char*
   return true;
 }
 
-bool wifiPetConnected() {
+bool wifiPetConnected(int attempts = 3) {
   if (WiFi.status() == WL_CONNECTED) return true;
   Serial.print("V: wifi begin ssid=\"");
   Serial.print(WIFI_SSID);
   Serial.println("\"");
-  for (int attempt = 1; attempt <= 3; attempt++) {
+  for (int attempt = 1; attempt <= attempts; attempt++) {
     WiFi.begin(WIFI_SSID, WIFI_PASS);
     const unsigned long start = millis();
     while (WiFi.status() != WL_CONNECTED) {
@@ -300,44 +306,33 @@ bool fetchBaiduToken() {
   return baiduToken.length() > 10;
 }
 
-// 识别 + 回答(阻塞,数秒):成功 true;transcript/reply/note 填充
-bool petProcessVoice(uint32_t samples, String& transcript, String& reply, String& note) {
-  transcript = "";
-  reply = "";
-  note = "";
+// 开机预连:WiFi(只试 1 次,≤15s)+ 百度 token。失败不阻止开机:离线照常做宠物,按 B 时再连
+void petNetWarmup() {
+  const uint32_t t0 = millis();
+#if PET_TEST_OFFLINE
+  const bool ok = false;  // 测试:模拟开机时无网
+#else
+  const bool ok = wifiPetConnected(1) && fetchBaiduToken();
+#endif
+  Serial.print("V: warmup ");
+  Serial.print(ok ? "ok" : "failed");
+  Serial.print(" ms=");
+  Serial.println(millis() - t0);
+}
 
-  petTm = {0, 0, 0, 0, 0};
-  const uint32_t tNet = millis();
-  if (!wifiPetConnected()) {
-    note = "wifi failed";
-    return false;
-  }
-  if (!fetchBaiduToken()) {
-    note = "baidu token failed";
-    return false;
-  }
+const char* const PET_SYSTEM_PROMPT =
+    "你是电子桌宠\"小维\",说话风格:活泼、简短、口语化。"
+    "用简体中文回答用户(45字以内),直接输出回答,不要任何前缀或解释。";
 
-  petTm.net = millis() - tNet;
-
+// 上传一次识别请求。返回百度 err_no;传输层失败返回 -1(note 填原因);响应缺 err_no 返回 -2
+int baiduAsrOnce(uint32_t lo, uint32_t n, String& transcript, String& note) {
   // ASR 走 HTTP 明文(80 端口):板载 TLS 写入只有 ~5KB/s,上传大音频会被服务器掐线;
   // 明文 TCP 快数倍。令牌仍走 HTTPS,音频本身在家庭网络内明文传输(玩具可接受)。
   WiFiClient client;
   if (!client.connect("vop.baidu.com", 80, 15000)) {
     note = "asr connect failed";
-    return false;
+    return -1;
   }
-
-  // 静音裁剪:去掉首尾低于阈值的段,只留有效语音(+100ms 余量)
-  uint32_t lo = 0, hi = samples;
-  while (lo < hi && abs(petPcm[lo]) < 400) lo++;
-  while (hi > lo + 1600 && abs(petPcm[hi - 1]) < 400) hi--;
-  if (hi - lo < 3200) { lo = 0; hi = samples; }  // 太短就整段
-  const uint32_t n = hi - lo;
-  Serial.print("V: trimmed ");
-  Serial.print(samples);
-  Serial.print(" -> ");
-  Serial.println(n);
-
   const uint32_t wavLen = 44 + 2 * n;
   const uint32_t b64Len = ((wavLen + 2) / 3) * 4;
   const String head = String("{\"format\":\"wav\",\"rate\":16000,\"dev_pid\":1537,") +
@@ -367,32 +362,28 @@ bool petProcessVoice(uint32_t samples, String& transcript, String& reply, String
 
   String asrBody;
   const uint32_t tAsr = millis();
-  const bool asrOk = readHttpBody(client, asrBody, 60000, "asr");
+  const bool ok = readHttpBody(client, asrBody, 60000, "asr");
   petTm.asr = millis() - tAsr;
-  if (!asrOk) {
+  if (!ok) {
     note = "asr http error";
-    return false;
+    return -1;
   }
   JsonDocument adoc;
   if (deserializeJson(adoc, asrBody)) {
     note = "asr bad json";
-    return false;
+    return -1;
   }
-  const int errNo = adoc["err_no"] | -1;
+  const int errNo = adoc["err_no"] | -2;
   transcript = String(adoc["result"][0] | "");
   Serial.print("V: baidu err_no=");
   Serial.print(errNo);
   Serial.print(" transcript=");
   Serial.println(transcript);
-  if (errNo != 0 || !transcript.length()) {
-    note = "asr rejected";
-    return false;
-  }
+  return errNo;
+}
 
-  if (strlen(DEEPSEEK_KEY) < 5) {
-    return true;  // 只识别,无回答
-  }
-
+// 问 DeepSeek,reply 为回答原文
+bool petAskLlm(const String& question, String& reply, String& note) {
   const uint32_t tConn = millis();
   WiFiClientSecure client2;
   if (!client2.connect("api.deepseek.com", 443, 20000)) {
@@ -406,12 +397,10 @@ bool petProcessVoice(uint32_t samples, String& transcript, String& reply, String
   JsonArray msgs = req2["messages"].to<JsonArray>();
   JsonObject sys = msgs.add<JsonObject>();
   sys["role"] = "system";
-  sys["content"] =
-      "你是电子桌宠\"小维\",说话风格:活泼、简短、口语化。"
-      "用简体中文回答用户(45字以内),直接输出回答,不要任何前缀或解释。";
+  sys["content"] = PET_SYSTEM_PROMPT;
   JsonObject user = msgs.add<JsonObject>();
   user["role"] = "user";
-  user["content"] = transcript;
+  user["content"] = question;
   req2["max_tokens"] = 120;  // 回答 45 字以内,够用且限制最坏耗时
 
   String body2;
@@ -427,9 +416,9 @@ bool petProcessVoice(uint32_t samples, String& transcript, String& reply, String
   client2.print(req2s);
 
   String llmBody;
-  const bool llmOk = readHttpBody(client2, llmBody, 30000, "llm");
+  const bool ok = readHttpBody(client2, llmBody, 30000, "llm");
   petTm.llm = millis() - tLlm;
-  if (!llmOk) {
+  if (!ok) {
     note = "llm http error";
     return false;
   }
@@ -446,6 +435,58 @@ bool petProcessVoice(uint32_t samples, String& transcript, String& reply, String
     return false;
   }
   return true;
+}
+
+// 识别 + 回答(阻塞,数秒):成功 true;transcript/reply/note 填充
+bool petProcessVoice(uint32_t samples, String& transcript, String& reply, String& note) {
+  transcript = "";
+  reply = "";
+  note = "";
+  petTm = {0, 0, 0, 0, 0};
+
+  const uint32_t tNet = millis();
+  if (!wifiPetConnected()) {
+    note = "wifi failed";
+    return false;
+  }
+  if (!fetchBaiduToken()) {
+    note = "baidu token failed";
+    return false;
+  }
+  petTm.net = millis() - tNet;
+
+  // 静音裁剪:去掉首尾低于阈值的段,只留有效语音(+100ms 余量)
+  uint32_t lo = 0, hi = samples;
+  while (lo < hi && abs(petPcm[lo]) < 400) lo++;
+  while (hi > lo + 1600 && abs(petPcm[hi - 1]) < 400) hi--;
+  if (hi - lo < 3200) { lo = 0; hi = samples; }  // 太短就整段
+  const uint32_t n = hi - lo;
+  Serial.print("V: trimmed ");
+  Serial.print(samples);
+  Serial.print(" -> ");
+  Serial.println(n);
+
+  int errNo = baiduAsrOnce(lo, n, transcript, note);
+  if (errNo == 110 || errNo == 111 || errNo == 3302) {  // token 失效/鉴权失败:重取一次再试
+    Serial.print("V: token rejected err_no=");
+    Serial.println(errNo);
+    baiduToken = "";
+    if (!fetchBaiduToken()) {
+      note = "baidu token failed";
+      return false;
+    }
+    errNo = baiduAsrOnce(lo, n, transcript, note);
+  }
+  if (errNo == -1) return false;
+  if (errNo != 0 || !transcript.length()) {
+    note = "asr rejected";
+    return false;
+  }
+
+  if (strlen(DEEPSEEK_KEY) < 5) {
+    return true;  // 只识别,无回答
+  }
+  return petAskLlm(transcript, reply, note);
 }
 
 #endif  // PET_HAS_WIFI

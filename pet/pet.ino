@@ -75,7 +75,13 @@ void setup() {
     while (true) delay(1000);
   }
   petMicBegin();
-  Serial.println("HELLO pet 1.0");
+  Serial.println("HELLO pet 1.1");
+  drawPet(0, F_NORMAL);
+  drawTextCJK("小维醒来中…正在连网", 84, 220, 320, TFT_DARKGREY);
+  petNetWarmup();
+#if PET_TEST_BAD_TOKEN
+  baiduToken = "invalid_token_for_selftest_0000";
+#endif
   enterIdle();
 }
 
