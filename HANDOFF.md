@@ -12,7 +12,7 @@ Wio Terminal(SAMD51 + 2.4" 彩屏 + WiFi + 板载麦克风)改造成的**离线�
 
 - **WioKit 库已建成**,pet 迁移到库上,语音全链路代码**编译通过**;`console/`、`game-console/` 未动
 - 迁移按设计文档 `docs/superpowers/specs/2026-10-02-wiokit-library-design.md` 分 9 步独立提交,
-  每步都编译验证过(git log 从 `4e882f8` 起可见完整过程)
+  每步都编译验证过(git log 从 `8364710` 起可见完整过程)
 - **尚未真机验证**(板子当时未接电脑),接手第一件事 = 烧录验收,见"下一步"
 
 ## 下一步:真机验收清单(按顺序)
@@ -26,7 +26,7 @@ Wio Terminal(SAMD51 + 2.4" 彩屏 + WiFi + 板载麦克风)改造成的**离线�
    pushImage(每字 16 次 SPI 事务 vs 原最多 256 次),字形背景像素会以 bg 色写屏:
    黑底默认黑、气泡已传白色,理论上无视觉差异,目测确认即可
 5. **行为小变化知悉**:按 B 后不说话,现在等满 8s 才提示"你还没说话呢~"
-   (原先 recStart 从开机起算,静音会瞬间报超时——是修复不是回归,commit `e1f6fce`)
+   (原先 recStart 从开机起算,静音会瞬间报超时——是修复不是回归,commit `d628e17`)
 6. **示例独立跑通**:`examples/CjkHello`(纯渲染,不需要网)、
    `examples/VoiceEcho`(拷 `pet/wifi_secrets.h` 到 `libraries/WioKit/examples/VoiceEcho/` 再烧)
 
