@@ -1,12 +1,31 @@
 # seeed-terminal — Wio Terminal 折腾仓库
 
-块子的"脸和按钮",大脑在云端。目前有三个项目:
+块子的"脸和按钮",大脑在云端。目前有四个项目:
 
 | 目录 | 内容 | 状态 |
 |------|------|------|
+| `libraries/WioKit/` | **WioKit 基础功能库**(中文渲染/录音/网络/传感器/百度ASR/DeepSeek) | ✅ 已库化,pet 已迁入 |
 | `sketches/HelloWio/` | 第一个测试程序:LED 闪烁 + 串口心跳 | ✅ 已验证 |
 | `game-console/` | 官方游戏机(贪吃蛇/推箱子/俄罗斯方块/打砖块/传感器工具) | ✅ 已烧录 |
 | `console/` + `host/` | **桌面 AI 控制台**(见下文) | ✅ 已烧录 |
+
+## WioKit 库(libraries/WioKit/)
+
+从桌宠「小维」沉淀出的标准 Arduino 库,所有 sketch 共享一份源码(解决跨目录 include 断链):
+
+- **L0** `WioKitLogic.h`:纯逻辑(HTTP 判停/chunked 解码/情绪标签/光线动作探测器),无 Arduino 依赖,`tests/pet_selftest` 板上自检
+- **L1** `WioKitCjk`(中文渲染)、`WioKitMic`(DMA 录音+VAD)、`WioKitNet`(WiFi/HTTP/b64)、`WioKitSense`(光线+IMU),每模块独立 include,不用的不进固件
+- **L2** `WioKitAsrBaidu`、`WioKitLlmDeepSeek`:云服务客户端,可选用;换厂商加新文件
+- 示例:`examples/CjkHello`(只渲染)、`examples/VoiceEcho`(录音→识别→回答全链路)
+
+```bash
+# 编译任何使用库的 sketch 都要带 --libraries(或直接用一键脚本)
+bash tools/flash_and_log.sh pet 600
+bash tools/flash_and_log.sh tests/pet_selftest 60        # L0 板上自检
+arduino-cli compile --fqbn Seeeduino:samd:seeed_wio_terminal --libraries libraries pet
+```
+
+Arduino IDE 用户:把 `libraries/WioKit/` 软链或拷贝到 sketchbook 的 `libraries/` 下即可。
 
 ## 桌面 AI 控制台(WioConsole)
 
@@ -44,7 +63,9 @@
 ### 改代码后重新烧录
 
 ```bash
-arduino-cli compile --fqbn Seeeduino:samd:seeed_wio_terminal --build-path build/console console
+bash tools/flash_and_log.sh console 600   # 一键:编译+烧录+挂日志(自动找口)
+# 或手动(注意 --libraries):
+arduino-cli compile --fqbn Seeeduino:samd:seeed_wio_terminal --libraries libraries --build-path build/console console
 arduino-cli upload  -p COM3 --fqbn Seeeduino:samd:seeed_wio_terminal --build-path build/console
 ```
 

@@ -1,27 +1,34 @@
 # HANDOFF — Wio Terminal AI 桌宠「小维」交接文档
 
-> 更新:2026-10-01。给下一个接手的会话/工程师:先读"当前状态"和"下一步",避免重复踩坑。
+> 更新:2026-10-02。给下一个接手的会话/工程师:先读"当前状态"和"下一步",避免重复踩坑。
 
 ## 一句话
 
 Wio Terminal(SAMD51 + 2.4" 彩屏 + WiFi + 板载麦克风)改造成的**离线语音 AI 桌宠「小维」**:
 按一下 B 说话 → 自动截断 → 百度 ASR 转文字 → DeepSeek 回答 → 屏幕以汉字气泡显示。
-主产品是 `pet/`(桌宠),另有 `console/`(菜单版控制台)和 `game-console/`(官方游戏机)保留。
+主产品是 `pet/`(桌宠),公共能力已沉淀为标准 Arduino 库 `libraries/WioKit/`(2026-10-02 完成)。
 
-## 当前状态(2026-10-01 晚更新)✅
+## 当前状态(2026-10-02)✅ 库化完成
 
-- **语音全链路已跑通**(用户实测:问天气 → 识别正确 → DeepSeek 回答“查不到实时天气”)
-- 真正根因不在读取端:`petProcessVoice` 上传时**漏写 WAV 头 + 漏调 `b64Flush()`**,实发字节比 Content-Length 少 ~1KB,百度一直等 → 60s 零响应。已按 console 版 `streamWav16` 的写法修复
-- 遗留小问题:本次测试串口日志只记到 `HELLO`,后续 `V:` 行没落盘(监听进程仍存活),原因未查
+- **WioKit 库已建成**,pet 迁移到库上,语音全链路代码**编译通过**;`console/`、`game-console/` 未动
+- 迁移按设计文档 `docs/superpowers/specs/2026-10-02-wiokit-library-design.md` 分 9 步独立提交,
+  每步都编译验证过(git log 从 `4e882f8` 起可见完整过程)
+- **尚未真机验证**(板子当时未接电脑),接手第一件事 = 烧录验收,见"下一步"
 
-## 上一轮状态(已过时,留作记录)
+## 下一步:真机验收清单(按顺序)
 
-- **刚烧录了"响应读取修复"版 pet 固件,用户尚未实测** —— 接手第一件事:
-  1. 让用户测一次语音(按一下 B → 说话 → 自动停)
-  2. 看日志:`bash tools/flash_and_log.sh none 300`(只听不烧),日志在 `C:\Users\lus\AppData\Local\Temp\wio_serial.log`
-  3. 若仍失败,重点看日志里新增的 `V: http raw=...`(不完整响应的原样内容)——上一轮实测百度其实已返回 181 字节响应,但读循环没识别到"响应结束"就扔了,本版改为"3 秒无新数据即收工"+原样打印
-- 已确认正常:WiFi(<REDACTED_SSID>, IP 192.168.0.124)、百度令牌获取(2.2s)、音频上传提速(明文 HTTP 2.7s vs TLS 19.7s)、中文汉字渲染
-- 唯一未验证环节:**百度响应的读取与解析**(本轮修复的内容)
+1. **L0 自检**:`bash tools/flash_and_log.sh tests/pet_selftest 60` → 日志须出现 `SELFTEST PASS 51/51`
+2. **pet 冒烟**:`bash tools/flash_and_log.sh pet 600` → 开机序列 `V: mic init ok` / `S: imu ok` /
+   `V: warmup ok` / `S: light=... adc1_en=1 mux=12`(ADC1 通道须回到 AIN12,证明共享读法没伤麦克风)
+3. **全链路 3 轮**:按 B 说话 → 看气泡与表情;记录每轮 `T:` 行 net/upload/asr/llm_conn/llm/total,
+   与迁移前对比(±5% 容差)。无迁移前基线数据时,以本轮为基线 A 留档
+4. **CJK 视觉确认**:气泡文字、待机提示、离线提示各看一眼 —— 渲染已从逐像素改为行缓冲
+   pushImage(每字 16 次 SPI 事务 vs 原最多 256 次),字形背景像素会以 bg 色写屏:
+   黑底默认黑、气泡已传白色,理论上无视觉差异,目测确认即可
+5. **行为小变化知悉**:按 B 后不说话,现在等满 8s 才提示"你还没说话呢~"
+   (原先 recStart 从开机起算,静音会瞬间报超时——是修复不是回归,commit `e1f6fce`)
+6. **示例独立跑通**:`examples/CjkHello`(纯渲染,不需要网)、
+   `examples/VoiceEcho`(拷 `pet/wifi_secrets.h` 到 `libraries/WioKit/examples/VoiceEcho/` 再烧)
 
 ## 硬件与账号
 
@@ -29,38 +36,67 @@ Wio Terminal(SAMD51 + 2.4" 彩屏 + WiFi + 板载麦克风)改造成的**离线�
 - 板子底部有两个 USB-C:一个连主控(串口/烧录用这个),另一个是无线模块固件下载口(插上电脑认不出串口)
 - WiFi:用户路由器双频,`<REDACTED_SSID>`(2.4G,**信道 12,板子连不上——区域码限制**)→ 用 5G 的 `<REDACTED_SSID>`(信道 44)
 - 密钥位置(均已 gitignore,**不要提交、不要外发**):
-  - `pet/wifi_secrets.h` / `console/wifi_secrets.h`:WiFi + 百度 ASR(API Key/Secret)+ DeepSeek Key(已实测有效)
-  - `host/config.json`:PC 中转模式配置(当前指向 DeepSeek;可改小米 MiMo——PC 上 MiMo 可用,板子上不可用,见坑 1)
+  - `pet/wifi_secrets.h`:WiFi + 百度 ASR(API Key/Secret)+ DeepSeek Key(已实测有效)
+  - `libraries/WioKit/examples/VoiceEcho/wifi_secrets.h`:示例用,拷 pet 的即可
+  - `host/config.json`:PC 中转模式配置
+- **库本身永不含密钥**:`wioNetBegin()/wioAsrBaiduBegin()/wioLlmDeepSeekBegin()` 参数注入,
+  没有密钥时 pet/examples 也能编译出"离线宠物"(运行时提示没配网)
 
 ## 构建与调试
 
 ```bash
-bash tools/flash_and_log.sh pet 600      # 编译+烧录 pet + 挂 600s 实时日志
-bash tools/flash_and_log.sh none 300     # 只听日志不烧录
-bash tools/flash_and_log.sh console 600  # 菜单版控制台
-# 日志实时写:C:\Users\lus\AppData\Local\Temp\wio_serial.log(Add-Content 逐行落盘)
+bash tools/flash_and_log.sh pet 600                     # 编译+烧录 pet + 挂 600s 实时日志
+bash tools/flash_and_log.sh none 300                    # 只听日志不烧录
+bash tools/flash_and_log.sh tests/pet_selftest 60       # L0 板上自检
+bash tools/flash_and_log.sh console 600                 # 菜单版控制台
+# 日志实时写:C:\Users\lus\AppData\Local\Temp\wio_serial.log(逐行落盘)
 ```
 
-- arduino-cli 在 `C:\Program Files\Arduino CLI\`,FQBN `Seeeduino:samd:seeed_wio_terminal`,板卡源 `files.seeedstudio.com/arduino/package_seeeduino_boards_index.json`
+- arduino-cli 在 `C:\Program Files\Arduino CLI\`,FQBN `Seeeduino:samd:seeed_wio_terminal`,
+  板卡源 `files.seeedstudio.com/arduino/package_seeeduino_boards_index.json`
+- **凡用到 WioKit 的 sketch,编译必须带 `--libraries libraries`**(flash_and_log.sh 已内置;
+  手动命令照 README)。Arduino IDE 用户:把 `libraries/WioKit/` 软链/拷进 sketchbook libraries
 - 串口独占是高频坑:**烧录/读日志前必须 kill 残留 PowerShell 监听**(脚本已内置)
-- PowerShell 重定向输出会块缓冲,实时日志必须用 Add-Content 逐行写文件
+- 体积参考(2026-10-02 编译):pet 316KB Flash / 169KB bss;selftest 65KB;
+  CjkHello 274KB / bss 63.5KB(麦克风缓冲等未用模块确认被 --gc-sections 剔除)
 
-## 软件架构(pet/)
+## 软件架构
 
-- `pet.ino`:状态机 `IDLE → RECORD(轮询 VAD)→ THINK(阻塞识别+回答)→ SHOW(气泡)→ IDLE`
-  - 待机动画只做**局部眨眼**(整屏重绘会闪烁,用户明确否决过)
-  - 摇杆左右 = 摸头(开心表情)
-- `voice_pet.h`:语音全链路
-  - 麦克风:**必须用官方 Seeed Arduino Mic 库(DMA 16bit + FilterBuHp 高通)**;手搓 analogRead 8bit 方案有直流偏置灾难(silence 偏离中点 80),已废弃
-  - VAD:轮询最近 1600 样本平均能量,静音 1.3s 自动截断;录音上限 3s(RAM 96KB int16)
-  - 百度 ASR:token 缓存于 RAM;**识别请求走 HTTP 明文 80 端口**(板载 TLS 写 ~5KB/s,HTTPS 传 64KB+ 会被百度掐线);上传前做首尾静音裁剪
-  - DeepSeek:`/v1/chat/completions`,HTTPS(DeepSeek 端点板子 TLS 握手 OK)
-  - b64/HTTP 工具函数是模板(typename ClientT),同时服务 WiFiClient 和 WiFiClientSecure
-- `cjk.h` + `font_hz16.h`/`font_index.h`:**中文渲染**。HZK16 16×16 点阵(区1-3 符号+全角标点、区16-55 一级汉字,共 4048 字形),UTF-8→GB2312 二分索引
-  - 生成器:`tools/gen_font.py`(源字库 `tools/HZK16.bin`);**索引条目必须过滤非 3 字节 UTF-8 的字符**(区1 有 9 个 2 字节注音符号,曾撞歪整张表导致全是方块)
-  - console/ 和 pet/ 各持一份拷贝(Arduino 会把 sketch 复制到临时目录编译,**跨目录 `../` 引用会断**,头文件间互相引用用本目录拷贝)
-- `pet_face.h`:宠物几何外观(表情=眼睛/嘴变化)
-- ⚠️ Arduino .ino 坑:函数原型会提升到文件顶,**自定义类型(enum/struct)不能出现在 .ino 函数签名里**(用 .h 承载,或 int 传参)
+```
+libraries/WioKit/            标准 Arduino 库(library.properties + src/ + examples/)
+  src/WioKitLogic.h          L0 纯逻辑:HTTP 判停/chunked/情绪标签/光线动作探测器
+                             (无 Arduino 依赖;唯一有自动化测试的层,tests/pet_selftest)
+  src/WioKitCjk.h/.cpp       L1 中文渲染:UTF-8→GB2312→HZK16,行缓冲 + pushImage 批量推送
+  src/WioKitFontHz16.h       字库数据(~150KB Flash;由 tools/gen_font.py 生成,勿手改)
+  src/WioKitMic.h/.cpp       L1 录音:DMA 16bit 16kHz + 高通 + VAD 截断 + 静音裁剪
+                             (96KB PCM 静态数组,wioRecBuffer() 零拷贝暴露)
+  src/WioKitNet.h            L1 网络(header-only 模板):WiFi 连接/HTTP 收发/b64 流式/
+                             WAV 头;HttpBuf 预分配收响应;等待循环走 wioNetYield()
+  src/WioKitSense.h/.cpp     L1 传感器:光线(ADC1 共享读法,踩坑成果勿改 analogRead)+ LIS3DH
+  src/WioKitAsrBaidu.h/.cpp  L2 百度 ASR:token 缓存/失效重取,WAV,明文 80 端口上传
+  src/WioKitLlmDeepSeek.h/.cpp L2 DeepSeek chat
+  src/WioKitTiming.h         计时账本(wioTiming(),"T:" 行数据源)
+pet/                         应用层只剩:状态机、pet_face/pet_anim(表情动画)、
+                             系统提示词、密钥(__has_include 门控)、语音编排 petProcessVoice()
+console/                     不迁,拷贝保留原状
+tests/pet_selftest/          L0 板上自检(直接 include 库头,不再有同步拷贝)
+tools/gen_font.py            字体生成器 → 直接吐到 libraries/WioKit/src/WioKitFontHz16.h
+```
+
+**三个解耦点**(改代码时别绕回去):
+
+1. display 注入:sketch 建 `Seeed_GFX display(...)` 后 `wioCjkBegin(display)`,库不引用全局
+2. yield 回调:`wioNetSetYield(petAnimTick)`;库内等待统一 `wioNetYield()`(判空),
+   网络层反向依赖应用动画的问题已根治
+3. 密钥参数化:`wioNetBegin(WIFI_SSID, WIFI_PASS)` 等;`__has_include("wifi_secrets.h")`
+   门控只在应用层(pet/examples)
+
+**性能铁律**(验收状态):
+
+- 热路径零堆分配 ✓ 录音回调/b64/HTTP 收发(HttpBuf 预分配)/字形渲染均无 malloc
+- 零成本抽象 ✓ 模板+inline+函数指针,无虚函数;未用模块被 --gc-sections 剔除(CjkHello 已验证)
+- 渲染批量化 ✓ drawPixel→行缓冲 pushImage(真机目测待确认,见验收清单 4)
+- 时延不退化 ✗ 待真机 3 轮对比(见验收清单 3)
 
 ## 踩坑史(重要,别重蹈)
 
@@ -69,26 +105,19 @@ bash tools/flash_and_log.sh console 600  # 菜单版控制台
 3. **2.4G 信道 12/13**:板子扫得到但连不上(区域码),用 5G SSID 绕开
 4. **百度 dev_pid**:15372 该账号不支持;**1537(普通话)实测可用**;音频必须 16bit 16kHz
 5. **上传速度**:板载 TLS 写仅 ~5KB/s,大音频上传会被服务器掐线 → 明文 HTTP + 静音裁剪解决
-6. **板载麦克风**:silence 时 ADC 偏离中点 80(直流偏置问题)→ 官方 DMA 库 + 高通滤波解决
-7. 读 HTTP 响应:RTL8720 栈在 Connection:close 后 `connected()` 不会及时变 false → 用"数据停止增长 3 秒"判停
+6. **板载麦克风**:silence 时 ADC 偏离中点 80(直流偏置问题)→ 官方 DMA 库 + 高通滤波解决;
+   光线传感器与麦克风共用 ADC1,**analogRead 会杀 DMA**,必须用 WioKitSense 里的共享读法
+7. 读 HTTP 响应:RTL8720 栈在 Connection:close 后 `connected()` 不会及时变 false → 用"数据停止增长 3 秒"判停(现封装在 wioReadHttp)
+8. **Arduino 跨目录 include 断链**:sketch 会被复制到临时目录编译,`../` 引用必断 → 共享代码进
+   `libraries/WioKit/`,编译带 `--libraries libraries`(库文件不被复制,经 -I 直接引用)
+9. **Arduino .ino 坑**:函数原型会提升到文件顶,自定义类型(enum/struct)不能出现在 .ino 函数
+   签名里——库化后类型都在 .h 中,此坑自然规避,但 .ino 里新加函数仍要留意
 
-## 下一步路线(用户认可的优先级)
+## 远期路线(用户认可的优先级)
 
-1. **验收响应读取修复**(见"当前状态")
-2. 对话记忆:SQLite/文件存多轮上下文(板端只存最近 N 轮摘要,或 PC 端做)
+1. 真机验收(见清单)→ 留 `T:` 基线 A
+2. 对话记忆:多轮上下文(板端最近 N 轮摘要,或 PC 端做)
 3. 提醒功能:"三点提醒我开会" → 时间抽取 → 到点蜂鸣+气泡
 4. 每日简报:天气 API + 待办推送
-5. 表情丰富化:更多情绪映射(回答带情绪标签驱动表情)
-6. 远期:SD 卡放 TTF + FreeType(更美的字体);HID 一键打字;游戏机模式共存入口
-
-## 文件地图
-
-```
-pet/                 主产品:AI 桌宠(pet.ino 状态机, voice_pet.h 语音, cjk+font 中文, pet_face.h 外观)
-console/             菜单版控制台(5 动作 + 语音Ask,串口协议接 host/)
-game-console/        官方游戏机(原样保留, .ino 已改名 game-console.ino 并修复枚举名)
-host/                PC 中转端(wio_console.py;test_mimo.py / test_baidu_asr.py 为接口自测脚本)
-tools/               flash_and_log.sh(一键烧录+日志), gen_font.py(字体生成), HZK16.bin, ambd_flash_tool/
-diag/tlsdiag/        TLS 连接诊断小品(上电自动测端点可达性,排查网络问题用)
-README.md            用户向说明(略旧,以本文件为准)
-```
+5. WioKit 后续:IMU/SD/蜂鸣器等新硬件封装按需进 L1;ASR/LLM 统一抽象接口(分层已留位)
+6. 远期:SD 卡放 TTF + FreeType(更美的字体);HID 一键打字
