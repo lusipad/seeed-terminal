@@ -1,15 +1,38 @@
 // 小维(Wio)—— AI 电子桌宠
 // 开机即宠物:待机会眨眼、张望、哼歌;按一下 B 开始听,说完自动发送;
 // 语音 → 百度ASR → DeepSeek → 对话气泡(汉字);摇杆左右 = 摸头。
+// 硬件能力(录音/渲染/网络/传感器)在 libraries/WioKit,这里只保留应用层:
+// 状态机、表情人设(pet_face/pet_anim)、系统提示词、密钥。
 
 #include <Arduino.h>
 #include <Seeed_GFX.h>
-#include <WioKitLogic.h>  // L0 纯逻辑(HTTP 判停/chunked/情绪标签/探测器)
-#include <WioKitCjk.h>    // L1 中文渲染(字库在库里,~150KB Flash)
-#include <WioKitMic.h>    // L1 麦克风 DMA 录音 + VAD
-#include <WioKitSense.h>  // L1 光线 + IMU(判定逻辑在 WioKitLogic)
 
-const uint32_t PET_TRAILING_MS = 900;  // 说完静音多久自动停(实测可调,与库内 VAD 配套)
+#include <WioKitLogic.h>   // L0 纯逻辑(HTTP 判停/chunked/情绪标签/探测器)
+#include <WioKitCjk.h>     // L1 中文渲染(字库在库里,~150KB Flash)
+#include <WioKitMic.h>     // L1 麦克风 DMA 录音 + VAD
+#include <WioKitSense.h>   // L1 光线 + IMU(判定逻辑在 WioKitLogic)
+#include <WioKitNet.h>     // L1 WiFi + HTTP + base64
+#include <WioKitTiming.h>  // 各阶段计时账本("T:" 行)
+
+// ---- 密钥:应用层负责(解耦点③,库永不含密钥)。没有 wifi_secrets.h 也能编译出离线宠物 ----
+#if __has_include("wifi_secrets.h")
+#define PET_HAS_WIFI 1
+#include "wifi_secrets.h"
+#else
+#define PET_HAS_WIFI 0
+#endif
+
+#if PET_HAS_WIFI
+#include <WioKitAsrBaidu.h>    // L2 百度 ASR
+#include <WioKitLlmDeepSeek.h> // L2 DeepSeek
+#endif
+
+#ifndef PET_TEST_OFFLINE
+#define PET_TEST_OFFLINE 0   // 1 = 开机预连直接失败(测试离线开机)
+#endif
+#ifndef PET_TEST_BAD_TOKEN
+#define PET_TEST_BAD_TOKEN 0 // 1 = 预连后把 token 改坏(测试失效自动重取)
+#endif
 
 Seeed_GFX display(Seeed_Product::Wio_Terminal);
 #include "pet_face.h"
@@ -27,7 +50,100 @@ void beep(int freq, int dur) {
   tone(WIO_BUZZER, freq, dur);
 }
 
-#include "voice_pet.h"  // 语音链路(百度ASR/DeepSeek;录音/网络已进 WioKit 库)
+const uint32_t PET_TRAILING_MS = 900;  // 说完静音多久自动停(实测可调,与库内 VAD 配套)
+
+// ============================================================
+// 语音链路编排(应用层):裁剪 → 识别 → 回答 → 情绪标签
+// ============================================================
+
+#if PET_HAS_WIFI
+
+const char* const PET_SYSTEM_PROMPT =
+    "你是电子桌宠\"小维\",性格活泼元气,说话简短、口语化、爱用感叹号。"
+    "回答必须以情绪标签开头,格式如 [开心],情绪只能从 开心/兴奋/惊讶/害羞/疑惑/难过 里选一个;"
+    "标签后直接是回答正文,用简体中文,45字以内,不要任何其他前缀或解释。";
+
+// 每轮结束打印 "T:" 行(格式不变,性能基线可对比)
+void petPrintTiming(uint32_t processMs) {
+  Serial.print("T: trail=");
+  Serial.print(PET_TRAILING_MS);
+  Serial.print(" net=");
+  Serial.print(wioTiming().net);
+  Serial.print(" upload=");
+  Serial.print(wioTiming().upload);
+  Serial.print(" asr=");
+  Serial.print(wioTiming().asr);
+  Serial.print(" llm_conn=");
+  Serial.print(wioTiming().llmConn);
+  Serial.print(" llm=");
+  Serial.print(wioTiming().llm);
+  Serial.print(" total=");
+  Serial.println(PET_TRAILING_MS + processMs);
+}
+
+// 开机预连:WiFi(只试 1 次,≤15s)+ 百度 token。失败不阻止开机:离线照常做宠物,按 B 时再连
+void petNetWarmup() {
+  const uint32_t t0 = millis();
+#if PET_TEST_OFFLINE
+  const bool ok = false;  // 测试:模拟开机时无网
+#else
+  const bool ok = wioNetConnected(1) && wioAsrBaiduWarmup();
+#endif
+  Serial.print("V: warmup ");
+  Serial.print(ok ? "ok" : "failed");
+  Serial.print(" ms=");
+  Serial.println(millis() - t0);
+}
+
+// 识别 + 回答(阻塞,数秒):成功 true;transcript/reply/note 填充。
+// 连网/令牌/失效重取在 wioAsrBaidu 内部;情绪标签解析在这里做(标签属于小维人设,不在库)
+bool petProcessVoice(uint32_t samples, String& transcript, String& reply, int& emotion, String& note) {
+  transcript = "";
+  reply = "";
+  note = "";
+  emotion = EMO_HAPPY;
+  wioTimingReset();
+
+  // 静音裁剪:去掉首尾低于阈值的段,只留有效语音(+100ms 余量)
+  uint32_t lo = 0, hi = samples;
+  wioRecTrim(lo, hi);
+  if (hi - lo < 3200) { lo = 0; hi = samples; }  // 太短就整段
+  const uint32_t n = hi - lo;
+  Serial.print("V: trimmed ");
+  Serial.print(samples);
+  Serial.print(" -> ");
+  Serial.println(n);
+
+  if (!wioAsrBaidu(wioRecBuffer() + lo, n, transcript, note)) return false;
+  if (strlen(DEEPSEEK_KEY) < 5) {
+    return true;  // 只识别,无回答
+  }
+  String raw;
+  if (!wioLlmAsk(transcript, raw, note)) return false;
+  size_t textStart = 0;
+  emotion = parseEmotionTag(raw.c_str(), raw.length(), &textStart);
+  reply = raw.substring(textStart);  // 标签不上屏
+  if (!reply.length()) {  // 空回复,或只给了标签没有正文
+    note = "llm empty reply";
+    return false;
+  }
+  return true;
+}
+
+#else  // !PET_HAS_WIFI:离线宠物,宠物行为照常,B 键按下后走"连不上网"提示
+
+void petPrintTiming(uint32_t processMs) { (void)processMs; }
+void petNetWarmup() {}
+bool petProcessVoice(uint32_t samples, String& transcript, String& reply, int& emotion, String& note) {
+  (void)samples;
+  transcript = "";
+  reply = "";
+  emotion = EMO_HAPPY;
+  note = "wifi failed";
+  return false;
+}
+
+#endif  // PET_HAS_WIFI
 
 // ============================================================
 // 状态机
@@ -49,7 +165,7 @@ void setBacklight(bool dim) {
   (void)PET_DIM_LEVEL;
 }
 
-// Emotion(pet_logic.h)→ 表情;顺序必须与 enum Emotion 一致:开心 兴奋 惊讶 害羞 疑惑 难过
+// Emotion(WioKitLogic.h)→ 表情;顺序必须与 enum Emotion 一致:开心 兴奋 惊讶 害羞 疑惑 难过
 const int EMO_FACE[6] = {F_HAPPY, F_EXCITED, F_SURPRISED, F_SHY, F_CONFUSED, F_SAD};
 
 // 把技术性 note 翻成小维口吻(原 note 仍显示在第二行,方便排查)
@@ -156,16 +272,20 @@ void setup() {
   randomSeed(analogRead(A0) ^ micros());
   wioMicBegin();
   wioMicConfig(400, PET_TRAILING_MS, 8000);  // 静音阈值 / 截断静音时长 / 没说话超时
+  wioSenseBegin();
+#if PET_HAS_WIFI
   wioNetSetYield(petAnimTick);  // 解耦点②:网络等待期间动画照常
   wioNetBegin(WIFI_SSID, WIFI_PASS);  // 解耦点③:密钥由应用注入,库永不含密钥
-  wioSenseBegin();
+  wioAsrBaiduBegin(BAIDU_API_KEY, BAIDU_SECRET_KEY);
+  wioLlmDeepSeekBegin(DEEPSEEK_KEY, PET_SYSTEM_PROMPT);
+#endif
   Serial.println("HELLO pet 1.2");
   drawPet(F_SLEEP);
   drawTextCJK("小维醒来中…正在连网", 84, 220, 320, TFT_DARKGREY);
   petAnimSet(A_WAKE);
   petNetWarmup();
 #if PET_TEST_BAD_TOKEN
-  baiduToken = "invalid_token_for_selftest_0000";
+  wioAsrBaiduDebugToken("invalid_token_for_selftest_0000");
 #endif
   lastInteract = millis();
   enterIdle();
