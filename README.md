@@ -1,86 +1,80 @@
-# seeed-terminal — Wio Terminal 折腾仓库
+# 小维 XiaoWei · Wio Terminal AI 桌宠
 
-块子的"脸和按钮",大脑在云端。目前有四个项目:
+> 给 Wio Terminal(SAMD51 + 2.4" 彩屏 + WiFi + 板载麦克风)装上性格:
+> **按一下 B 说话,说完自动停 → 百度 ASR 识别 → DeepSeek 回答 → 汉字气泡 + 匹配的表情。**
+> 它还会眨眼、张望、哼歌;被摇晃会晕,摸头会开心,没人理会打哈欠、睡着。
 
-| 目录 | 内容 | 状态 |
-|------|------|------|
-| `libraries/WioKit/` | **WioKit 基础功能库**(中文渲染/录音/网络/传感器/百度ASR/DeepSeek) | ✅ 已库化,pet 已迁入 |
-| `sketches/HelloWio/` | 第一个测试程序:LED 闪烁 + 串口心跳 | ✅ 已验证 |
-| `console/` + `host/` | **桌面 AI 控制台**(见下文) | ✅ 已烧录 |
-| `diag/tlsdiag/` | TLS 连接诊断小品(排查板子到各端点的可达性) | ✅ 已验证 |
+<!-- TODO: 实机照片 / GIF(待机表情、聆听声波、回答气泡、睡觉 Zzz)
+     放到 docs/img/ 后在此引用,欢迎补充 -->
 
-> 另有 `game-console/`(Seeed 官方游戏机)仅本地保留,不入库。
+## 玩法
 
-## WioKit 库(libraries/WioKit/)
-
-从桌宠「小维」沉淀出的标准 Arduino 库,所有 sketch 共享一份源码(解决跨目录 include 断链):
-
-- **L0** `WioKitLogic.h`:纯逻辑(HTTP 判停/chunked 解码/情绪标签/光线动作探测器),无 Arduino 依赖,`tests/pet_selftest` 板上自检
-- **L1** `WioKitCjk`(中文渲染)、`WioKitMic`(DMA 录音+VAD)、`WioKitNet`(WiFi/HTTP/b64)、`WioKitSense`(光线+IMU),每模块独立 include,不用的不进固件
-- **L2** `WioKitAsrBaidu`、`WioKitLlmDeepSeek`:云服务客户端,可选用;换厂商加新文件
-- 示例:`examples/CjkHello`(只渲染)、`examples/VoiceEcho`(录音→识别→回答全链路)
-
-```bash
-# 编译任何使用库的 sketch 都要带 --libraries(或直接用一键脚本)
-bash tools/flash_and_log.sh pet 600
-bash tools/flash_and_log.sh tests/pet_selftest 60        # L0 板上自检
-arduino-cli compile --fqbn Seeeduino:samd:seeed_wio_terminal --libraries libraries pet
-```
-
-Arduino IDE 用户:把 `libraries/WioKit/` 软链或拷贝到 sketchbook 的 `libraries/` 下即可。
-
-## 桌面 AI 控制台(WioConsole)
-
-摇杆选动作、按键触发、屏幕显示状态。三种使用形态:
-
-- **PC 中转模式**:板子 → 串口 → PC 脚本 → DeepSeek API → 结果写回剪贴板 + 回传屏幕
-- **语音助理模式(脱离 PC)**:板子直连小米 MiMo API —— 按住 B 说话 → 板载麦克风录音 → MiMo-V2.5-ASR 转文字 → MiMo-V2.6 大模型回答 → 屏幕
-- **DeepSeek 直连**(菜单第 7 项):板子自己连 WiFi 调 DeepSeek
-
-### 操作
-
-| 按键 | 功能 |
+| 动作 | 反应 |
 |------|------|
-| 摇杆上/下 | 选动作 |
-| 摇杆按下 / 顶部 A | 执行 |
-| 顶部 B | 测试 PC 链路;语音模式下按住=录音,松开=发送 |
-| 顶部 C | 返回菜单 |
+| 按一下 B | 开始听,说完自动发送(0.9s 静音自动截断,最长 3s) |
+| 摇杆左 / 右 | 摸头:开心 |
+| 摇晃 | 晕 3 秒(蚊香眼),之后冷却 5 秒 |
+| 拿起 | 从犯困里打起精神 |
+| 3 分钟没人理 / 5 分钟 | 犯困(打哈欠)/ 睡觉(Zzz) |
+| 任意按键 | 睡醒 |
 
-动作清单:1 Translate(翻译剪贴板)、2 Summarize(总结)、3 Commit Msg、4 Inspire(毒鸡汤)、5 Hello Test(PC 链路自检,不需 Key)、**6 Voice Ask(语音问答,脱离 PC)**、7 DeepSeek Cloud。
+回答以情绪标签(`[开心]` `[兴奋]` `[惊讶]` `[害羞]` `[疑惑]` `[难过]`)开头,由系统提示词约定、
+DeepSeek 生成;标签驱动 14 种几何表情,正文以气泡上屏。录音为 16bit@16kHz DMA 采样 + 高通滤波,
+上传前做首尾静音裁剪。
 
-### 首次使用
+## 快速上手
 
-1. **PC 中转模式**
+硬件:Wio Terminal + USB-C 数据线 + WiFi(2.4G 信道 12/13 连不上,优先 5G,见 HANDOFF 踩坑史)。
+
+1. 安装 [arduino-cli](https://arduino.github.io/arduino-cli/)、板卡包
+   `Seeeduino:samd`(板卡源 `https://files.seeedstudio.com/arduino/package_seeeduino_boards_index.json`)
+   及依赖库:`Seeed_GFX2`、`Seeed Arduino rpcWiFi`、`ArduinoJson`、`Seeed Arduino Mic`、
+   `Grove-3-Axis-Digital-Accelerometer-2g-to-16g-LIS3DHTR`
+2. 配密钥:`cp pet/wifi_secrets.h.example pet/wifi_secrets.h`,填 WiFi、百度语音 Key、DeepSeek Key
+   (该文件已被 gitignore;不填则得到一只"离线宠物"——动画表情照常,说话会提示没网)
+3. 编译烧录(一键脚本,Windows/Git Bash,自动按 VID 找串口 + 挂串口日志;其他平台用下面的手动命令):
+
    ```bash
-   cd host
-   pip install -r requirements.txt
-   # 编辑 config.json,把 DeepSeek 的 Key 填进 api_key(或设环境变量 DEEPSEEK_API_KEY)
-   python wio_console.py
+   bash tools/flash_and_log.sh pet 600
    ```
-   连上后板子会自动跑一次 Hello 自检;屏幕左下角 `PC: linked` 表示链路正常。
-2. **语音助理 / 直连模式**:编辑 `console/wifi_secrets.h`,填入 WiFi 名称/密码和 MiMo Key(`sk-xxx`),然后重新编译烧录(见下)。
-   - 验证 MiMo Key/接口:`python host/test_mimo.py`(大模型对话 + ASR 转写全链路自测)
-   - 语音助手依赖 MiMo 开放平台 API:https://platform.xiaomimimo.com
 
-### 改代码后重新烧录
+   ```bash
+   arduino-cli compile --fqbn Seeeduino:samd:seeed_wio_terminal --libraries libraries pet
+   arduino-cli upload  -p <PORT> --fqbn Seeeduino:samd:seeed_wio_terminal --libraries libraries
+   ```
 
-```bash
-bash tools/flash_and_log.sh console 600   # 一键:编译+烧录+挂日志(自动找口)
-# 或手动(注意 --libraries):
-arduino-cli compile --fqbn Seeeduino:samd:seeed_wio_terminal --libraries libraries --build-path build/console console
-arduino-cli upload  -p COM3 --fqbn Seeeduino:samd:seeed_wio_terminal --build-path build/console
-```
+4. 按 B,跟它说句话。
 
-### 已知限制 / 后续路线
+## WioKit —— 它脚下的库
 
-- 屏幕暂只能显示 ASCII。语音助手的桥接方案:让 LLM 在回复里附 `HEARD:`/`PY:` 两行无声调拼音,屏幕可读;中文上屏需 microSD 卡放字体 + FreeType 库(下一步)
-- 板载麦克风 + 8bit 采样,录音最长 3 秒(RAM 限制);识别效果不佳时换 microSD 卡缓存 + 16bit
-- 直连/语音模式未配置 CA 证书(跳过 TLS 证书校验),玩具用途可接受
-- 待办:SD 中文字库上屏、HID 一键打字回 PC、提醒/每日简报、对话记忆
+pet 的全部硬件能力沉淀在 [libraries/WioKit/](libraries/WioKit/)(标准 Arduino 库,
+编译时 `--libraries libraries` 即可被任何 sketch 复用):
 
-## 环境备忘
+| 层 | 模块 | 内容 |
+|----|------|------|
+| L0 | `WioKitLogic.h` | 纯逻辑(无 Arduino 依赖):HTTP 判停 / chunked 解码 / 情绪标签 / 光线动作探测器,板上自检覆盖 |
+| L1 | `WioKitCjk` | 中文渲染:UTF-8→GB2312→HZK16,行缓冲 + pushImage 批量推送 |
+| L1 | `WioKitMic` | DMA 录音 + VAD 自动截断 + 静音裁剪(96KB PCM 零拷贝暴露) |
+| L1 | `WioKitNet` | WiFi 连接 / HTTP 收发(预分配 HttpBuf)/ base64 流式上传 / 等待期 yield 回调 |
+| L1 | `WioKitSense` | 光线(与麦克风共用 ADC1 的共享读法)+ LIS3DH 摇晃/拿起 |
+| L2 | `WioKitAsrBaidu` | 百度 ASR:token 缓存与失效重取、WAV 封装、明文 80 端口上传 |
+| L2 | `WioKitLlmDeepSeek` | DeepSeek chat 客户端 |
 
-- arduino-cli:`C:\Program Files\Arduino CLI\arduino-cli.exe`(已进 PATH)
-- 板卡:Seeeduino:samd 1.8.6,FQBN `Seeeduino:samd:seeed_wio_terminal`,串口 COM3
-- 板卡源:`https://files.seeedstudio.com/arduino/package_seeeduino_boards_index.json`
-- 已装库:Seeed_GFX2、Seeed Arduino rpcWiFi(+rpcUnified)、ArduinoJson
+模块独立 include,不用的不进固件(纯渲染示例固件比 pet 小 40KB+)。独立示例:
+`examples/CjkHello`(只画中文)、`examples/VoiceEcho`(录音→识别→回答全链路)。
+
+## 其他项目
+
+- **`console/` + `host/`** — 菜单版桌面控制台(PC 中转 / 板端语音助理 / 直连 DeepSeek 三种形态),
+  动作经摇杆选择,串口协议对接 `host/wio_console.py`(配置见 `host/config.json.example`)
+- **`diag/tlsdiag/`** — 板子到各 AI 端点的 TLS 可达性诊断,排查网络问题用
+- **`sketches/HelloWio/`** — 点灯小品
+- **`tests/pet_selftest/`** — WioKit L0 纯逻辑的板上自检(`bash tools/flash_and_log.sh tests/pet_selftest 60`)
+
+## 文档
+
+- [HANDOFF.md](HANDOFF.md) — 开发笔记:软件架构细节、踩坑史(9 条真金白银)、真机验收清单。
+  写给下一个接手的人,多半是未来的自己
+- [docs/superpowers/specs/](docs/superpowers/specs/) — 两份设计文档:情绪+提速、WioKit 库化
+- [docs/superpowers/plans/](docs/superpowers/plans/) — 情绪+提速一轮改造的开发记事(原始过程日志见 git 历史)
+- [docs/perf-log.md](docs/perf-log.md) — 语音链路计时基线
