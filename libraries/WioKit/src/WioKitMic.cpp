@@ -60,6 +60,10 @@ void wioRecStart() {
   micIdx = 0;
   micDone = false;
   micRecording = 1;
+  // 超时从开始录音起算。原先 recStart 只在首次有声时才赋值(默认 0 = 开机时刻),
+  // 开机超过 8s 后按 B 又不开口,第一次轮询就会立刻报"超时没说话"
+  recStart = millis();
+  speechSeen = false;
 }
 
 // 轮询:返回 0=还在录 1=录完(结束) 2=超时没说话
