@@ -1,5 +1,6 @@
-// ---- 纯逻辑(无 Arduino 依赖):HTTP 响应判定、chunked 解码 ----
-// pet/ 是唯一源头;改完运行 tools/sync_logic.sh 同步到 tests/pet_selftest/,再跑板上自检
+// ---- L0 纯逻辑(无 Arduino 依赖,PC/板上均可测):HTTP 响应判定、chunked 解码、
+// ---- 情绪标签解析、光线/动作探测器 ----
+// 唯一有自动化测试(板上自检 tests/pet_selftest)的层;上层 WioKitNet/WioKitSense 复用。
 #pragma once
 #include <stddef.h>
 #include <string.h>

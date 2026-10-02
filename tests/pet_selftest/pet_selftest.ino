@@ -1,7 +1,7 @@
-// pet_logic.h 板上自检:等串口打开后跑全部断言,之后每 3 秒重复打印汇总
-// 运行:bash tools/sync_logic.sh && bash tools/flash_and_log.sh tests/pet_selftest 60
+// WioKitLogic.h(L0 纯逻辑)板上自检:等串口打开后跑全部断言,之后每 3 秒重复打印汇总
+// 运行:bash tools/flash_and_log.sh tests/pet_selftest 60
 #include <Arduino.h>
-#include "pet_logic.h"
+#include <WioKitLogic.h>
 
 int passN = 0, failN = 0;
 

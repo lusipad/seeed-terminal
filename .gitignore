@@ -10,5 +10,4 @@ __pycache__/
 # 独立仓库 / 大体积工具 / 同步生成的拷贝
 game-console/
 tools/ambd_flash_tool/
-tests/pet_selftest/pet_logic.h
 .superpowers/

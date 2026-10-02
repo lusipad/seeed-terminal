@@ -4,9 +4,10 @@
 
 #include <Arduino.h>
 #include <Seeed_GFX.h>
+#include <WioKitLogic.h>  // L0 纯逻辑(原 pet_logic.h,库化后唯一来源在 libraries/WioKit)
 
 Seeed_GFX display(Seeed_Product::Wio_Terminal);
-#include "cjk.h"
+#include "cjk.h"  // (下一步迁移到 WioKitCjk)
 #include "pet_face.h"
 #include "pet_anim.h"
 

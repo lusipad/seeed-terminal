@@ -1,6 +1,8 @@
-// ---- 传感器:光线(关灯睡觉)+ IMU(摇晃/拿起);判定逻辑在 pet_logic.h ----
+// ---- 传感器:光线(关灯睡觉)+ IMU(摇晃/拿起);判定逻辑在 WioKitLogic.h(L0) ----
 // 只在 IDLE / SHOW / SLEEP 状态调用 petSensePoll(录音时不碰 ADC,避免干扰麦克风 DMA)
 #pragma once
+#include <Arduino.h>
+#include <WioKitLogic.h>
 #include <LIS3DHTR.h>
 #include "wiring_private.h"  // pinPeripheral
 

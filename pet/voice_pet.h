@@ -14,7 +14,7 @@
 #include <rpcWiFi.h>
 #include <rpcWiFiClientSecure.h>
 #include <ArduinoJson.h>
-#include "pet_logic.h"
+#include <WioKitLogic.h>
 #include "wifi_secrets.h"
 #else
 #define PET_HAS_WIFI 0
