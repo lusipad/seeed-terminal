@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""从 HZK16.bin 生成板载中文字库 C 头文件:
-   - font_hz16.h  : 点阵数据(GB2312 区1-3 符号/全角标点 + 区16-55 一级汉字)
-   - font_index.h : UTF-8(3字节) -> GB2312(2字节) 索引,按 UTF-8 排序供二分查找
+"""从 HZK16.bin 生成板载中文字库头文件(单文件,点阵 + 索引):
+   - libraries/WioKit/src/WioKitFontHz16.h
+     · HZ16_FONT : 点阵数据(GB2312 区1-3 符号/全角标点 + 区16-55 一级汉字)
+     · HZ16_INDEX: UTF-8(3字节) -> GB2312(2字节) 索引,按 UTF-8 排序供二分查找
    解码用 GBK 超集(让 — 等映射进区1),但只收录 HZK16 有字形的区。
+   消费方:WioKitCjk.cpp(WioKit 库)。console/ 仍持有旧拷贝,不随本脚本再生。
 """
 import os
 
 SRC = r"D:\Repos\seeed-terminal\tools\HZK16.bin"
-OUT_DIR = r"D:\Repos\seeed-terminal\console"
+OUT_PATH = r"D:\Repos\seeed-terminal\libraries\WioKit\src\WioKitFontHz16.h"
 
 data = open(SRC, "rb").read()
 assert len(data) == 261696, f"unexpected HZK16 size {len(data)}"
@@ -45,23 +47,19 @@ for qu in ZONES:
 
 entries.sort(key=lambda e: e[0])
 
-# ---- font_hz16.h ----
-with open(os.path.join(OUT_DIR, "font_hz16.h"), "w") as f:
-    f.write("// 自动生成:HZK16 子集(GB2312 区1-3 符号/全角标点 + 区16-55 一级汉字),勿手改\n")
+# ---- WioKitFontHz16.h(点阵 + 索引) ----
+with open(OUT_PATH, "w", newline="\n") as f:
+    f.write("// 自动生成:HZK16 子集字库 + UTF-8->GB2312 索引(tools/gen_font.py 生成,勿手改)\n")
+    f.write("// 点阵:GB2312 区1-3 符号/全角标点 + 区16-55 一级汉字(共 %d 字形 x 32B)\n" % (len(glyphs) // 32))
+    f.write("// 索引:按 UTF-8 排序供二分查找,每项 5 字节 utf8[0..2] + gb[0] + gb[1]\n")
     f.write("#pragma once\n#include <stdint.h>\n\n")
     f.write(f"#define HZ16_GLYPH_COUNT {len(glyphs) // 32}\n")
+    f.write(f"#define HZ16_INDEX_COUNT {len(entries)}\n\n")
     f.write("// 索引: qu 1-3 -> (qu-1)*94 + (wei-1); 16<=qu<=55 -> 282 + (qu-16)*94 + (wei-1) (单位:32字节)\n")
     f.write("const uint8_t HZ16_FONT[] = {\n")
     for i in range(0, len(glyphs), 16):
         f.write("  " + ",".join(f"0x{b:02X}" for b in glyphs[i:i + 16]) + ",\n")
-    f.write("};\n")
-print("font_hz16.h:", len(glyphs), "bytes,", len(glyphs) // 32, "glyphs")
-
-# ---- font_index.h ----
-with open(os.path.join(OUT_DIR, "font_index.h"), "w") as f:
-    f.write("// 自动生成:UTF-8 -> GB2312 索引(按 UTF-8 排序,二分查找),勿手改\n")
-    f.write("#pragma once\n#include <stdint.h>\n\n")
-    f.write(f"#define HZ16_INDEX_COUNT {len(entries)}\n")
+    f.write("};\n\n")
     f.write("// 每项 5 字节: utf8[0..2] + gb[0] + gb[1]\n")
     f.write("const uint8_t HZ16_INDEX[] = {\n")
     flat = bytearray()
@@ -71,4 +69,4 @@ with open(os.path.join(OUT_DIR, "font_index.h"), "w") as f:
     for i in range(0, len(flat), 15):
         f.write("  " + ",".join(f"0x{b:02X}" for b in flat[i:i + 15]) + ",\n")
     f.write("};\n")
-print("font_index.h:", len(entries), "entries,", len(flat), "bytes")
+print("WioKitFontHz16.h:", len(glyphs) // 32, "glyphs,", len(entries), "entries")

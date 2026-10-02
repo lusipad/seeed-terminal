@@ -4,10 +4,10 @@
 
 #include <Arduino.h>
 #include <Seeed_GFX.h>
-#include <WioKitLogic.h>  // L0 纯逻辑(原 pet_logic.h,库化后唯一来源在 libraries/WioKit)
+#include <WioKitLogic.h>  // L0 纯逻辑(HTTP 判停/chunked/情绪标签/探测器)
+#include <WioKitCjk.h>    // L1 中文渲染(字库在库里,~150KB Flash)
 
 Seeed_GFX display(Seeed_Product::Wio_Terminal);
-#include "cjk.h"  // (下一步迁移到 WioKitCjk)
 #include "pet_face.h"
 #include "pet_anim.h"
 
@@ -149,6 +149,7 @@ void setup() {
     Serial.println(display.lastResult().message);
     while (true) delay(1000);
   }
+  wioCjkBegin(display);  // 注入 display(解耦点①),之后 drawTextCJK 全局可用
   randomSeed(analogRead(A0) ^ micros());
   petMicBegin();
   petSenseBegin();
