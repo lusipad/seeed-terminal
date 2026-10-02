@@ -76,6 +76,38 @@ void testEmotion() {
   emo("", EMO_HAPPY, "", "emo: empty");
 }
 
+void testSense() {
+  // 光线:暗阈值 60,亮阈值 120;变暗需持续 10s,变亮需持续 2s
+  LightDetector ld(60, 120, 10000, 2000);
+  check(ld.update(30, 0) == 0, "light: dark pending");
+  check(ld.update(30, 9999) == 0, "light: dark not yet");
+  check(ld.update(30, 10000) == 1, "light: became dark");
+  check(ld.update(100, 11000) == 0, "light: hysteresis keeps dark");
+  check(ld.update(200, 12000) == 0, "light: bright pending");
+  check(ld.update(30, 13000) == 0, "light: flicker resets");
+  check(ld.update(200, 14000) == 0, "light: bright pending again");
+  check(ld.update(200, 16000) == 2, "light: became bright");
+
+  // 动作:摇晃阈值 800mg,拿起阈值 300mg,静止 3s 才算放稳
+  MotionDetector md(800, 300, 3000);
+  int ev = 0;
+  for (uint32_t t = 0; t <= 3500; t += 50) ev |= md.update(0, 0, 1000, t);
+  check(ev == MOTION_NONE, "motion: still no event");
+  check(md.update(300, 0, 900, 3550) == MOTION_PICKUP, "motion: pickup after still");
+  check(md.update(300, 0, 900, 3600) == MOTION_NONE, "motion: no repeat pickup");
+  check(md.update(0, 0, 2000, 5000) == MOTION_NONE, "motion: shake hit 1");
+  check(md.update(0, 0, 2000, 5100) == MOTION_NONE, "motion: shake hit 2");
+  check(md.update(0, 0, 2000, 5200) == MOTION_SHAKE, "motion: shake hit 3");
+  check(md.update(0, 0, 2000, 5300) == MOTION_NONE, "motion: shake cooldown");
+  check(md.update(0, 0, 2000, 5400) == MOTION_NONE, "motion: shake cooldown 2");
+  md.update(0, 0, 2000, 14000);
+  md.update(0, 0, 2000, 14100);
+  check(md.update(0, 0, 2000, 14200) == MOTION_SHAKE, "motion: shake again after cooldown");
+  MotionDetector md2(800, 300, 3000);
+  check(md2.update(0, 0, 1000, 0) == MOTION_NONE, "motion: fresh");
+  check(md2.update(400, 0, 1000, 100) == MOTION_NONE, "motion: move without prior still");
+}
+
 void printSummary() {
   Serial.print(failN ? "SELFTEST FAIL " : "SELFTEST PASS ");
   Serial.print(passN);
@@ -91,6 +123,7 @@ void setup() {
   testHttp();
   testChunked();
   testEmotion();
+  testSense();
   printSummary();
 }
 

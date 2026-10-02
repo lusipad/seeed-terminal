@@ -14,12 +14,16 @@ const int PIN_KEY_B = WIO_KEY_B;
 const int PIN_KEY_C = WIO_KEY_C;
 const int PIN_JOY_L = WIO_5S_LEFT;
 const int PIN_JOY_R = WIO_5S_RIGHT;
+// 全部 8 个按键输入(唤醒/提前结束显示时任意键都算)
+const int ALL_KEYS[8] = {WIO_KEY_A, WIO_KEY_B, WIO_KEY_C, WIO_5S_UP,
+                         WIO_5S_DOWN, WIO_5S_LEFT, WIO_5S_RIGHT, WIO_5S_PRESS};
 
 void beep(int freq, int dur) {
   tone(WIO_BUZZER, freq, dur);
 }
 
 #include "voice_pet.h"  // 语音链路(麦克风 DMA/百度ASR/DeepSeek)
+#include "pet_sense.h"  // 光线 + IMU
 
 // ============================================================
 // 状态机
@@ -35,9 +39,10 @@ const unsigned long PET_DROWSY_MS = 180000;  // 3 分钟没人理 → 犯困
 const unsigned long PET_SLEEP_MS = 300000;   // 5 分钟 → 睡觉
 const int PET_DIM_LEVEL = 40;                // 睡觉时背光 PWM(0-255)
 
-// 背光:若 LCD_BACKLIGHT 不支持 PWM,analogWrite 会退化成全亮/全灭 —— 需真机确认
+// 背光:LCD_BACKLIGHT 实测不支持 PWM,analogWrite 会直接全灭且无法调暗 —— 睡觉时保持亮度,只显示睡觉画面
 void setBacklight(bool dim) {
-  analogWrite(LCD_BACKLIGHT, dim ? PET_DIM_LEVEL : 255);
+  (void)dim;
+  (void)PET_DIM_LEVEL;
 }
 
 // Emotion(pet_logic.h)→ 表情;顺序必须与 enum Emotion 一致:开心 兴奋 惊讶 害羞 疑惑 难过
@@ -95,11 +100,43 @@ void wakeUp() {
   petAnimSet(A_WAKE);  // 睁眼动画结束后自动转 A_IDLE
 }
 
+void startDizzy() {
+  lastInteract = millis();
+  state = ST_SHOW;
+  stateStart = millis();
+  showUntil = millis() + 3000;
+  drawPet(F_DIZZY);
+  petAnimSet(A_DIZZY);
+}
+
+// 传感器事件:只在 IDLE / SHOW / SLEEP 处理;录音、思考时不采样
+void handleSense() {
+  if (state != ST_IDLE && state != ST_SHOW && state != ST_SLEEP) return;
+  const int ev = petSensePoll();
+  if (ev == SE_NONE) return;
+  Serial.print("S: event=");
+  Serial.println(ev);
+  if (state == ST_SLEEP) {
+    if (ev == SE_LIGHT || ev == SE_PICKUP || ev == SE_SHAKE) wakeUp();
+    return;
+  }
+  if (ev == SE_DARK) {
+    enterSleep();
+    return;
+  }
+  if (ev == SE_SHAKE) {
+    beep(523, 60);
+    startDizzy();
+    return;
+  }
+  if (ev == SE_PICKUP) {
+    lastInteract = millis();
+    if (petAnimCurrent() == A_DROWSY) petAnimSet(A_IDLE);
+  }
+}
+
 void setup() {
-  pinMode(PIN_KEY_B, INPUT_PULLUP);
-  pinMode(PIN_KEY_C, INPUT_PULLUP);
-  pinMode(PIN_JOY_L, INPUT_PULLUP);
-  pinMode(PIN_JOY_R, INPUT_PULLUP);
+  for (int i = 0; i < 8; i++) pinMode(ALL_KEYS[i], INPUT_PULLUP);
 
   Serial.begin(115200);
   const uint32_t t0 = millis();
@@ -113,6 +150,7 @@ void setup() {
   }
   randomSeed(analogRead(A0) ^ micros());
   petMicBegin();
+  petSenseBegin();
   Serial.println("HELLO pet 1.2");
   drawPet(F_SLEEP);
   drawTextCJK("小维醒来中…正在连网", 84, 220, 320, TFT_DARKGREY);
@@ -134,12 +172,15 @@ bool pressed(int pin) {
 }
 
 bool anyKeyDown() {
-  return digitalRead(PIN_KEY_B) == LOW || digitalRead(PIN_KEY_C) == LOW ||
-         digitalRead(PIN_JOY_L) == LOW || digitalRead(PIN_JOY_R) == LOW;
+  for (int i = 0; i < 8; i++) {
+    if (digitalRead(ALL_KEYS[i]) == LOW) return true;
+  }
+  return false;
 }
 
 void loop() {
   petAnimTick();
+  handleSense();
   switch (state) {
     case ST_IDLE: {
       const unsigned long idleFor = millis() - lastInteract;

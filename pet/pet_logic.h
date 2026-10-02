@@ -5,6 +5,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include <stdint.h>
 
 enum HttpState { HTTP_NEED_MORE = 0, HTTP_DONE = 1, HTTP_NO_LENGTH = 2 };
 
@@ -107,3 +108,81 @@ inline int parseEmotionTag(const char* s, size_t n, size_t* textStart) {
   }
   return EMO_HAPPY;
 }
+
+// 光线判定:双阈值迟滞 + 持续时间。暗于 darkTh 持续 darkHoldMs → 1(变暗);亮于等于 lightTh 持续 lightHoldMs → 2(变亮)
+struct LightDetector {
+  int darkTh, lightTh;
+  uint32_t darkHoldMs, lightHoldMs;
+  bool isDark, pending;
+  uint32_t since;
+  LightDetector(int darkTh_, int lightTh_, uint32_t darkHoldMs_, uint32_t lightHoldMs_)
+      : darkTh(darkTh_), lightTh(lightTh_), darkHoldMs(darkHoldMs_), lightHoldMs(lightHoldMs_),
+        isDark(false), pending(false), since(0) {}
+  int update(int v, uint32_t now) {
+    const bool wantDark = isDark ? (v < lightTh) : (v < darkTh);
+    if (wantDark == isDark) {  // 回到当前状态:取消待定(防闪烁)
+      pending = false;
+      return 0;
+    }
+    if (!pending) {
+      pending = true;
+      since = now;
+      return 0;
+    }
+    if (now - since >= (wantDark ? darkHoldMs : lightHoldMs)) {
+      isDark = wantDark;
+      pending = false;
+      return isDark ? 1 : 2;
+    }
+    return 0;
+  }
+};
+
+enum MotionEvent { MOTION_NONE = 0, MOTION_SHAKE = 1, MOTION_PICKUP = 2 };
+
+// 动作判定(输入三轴加速度,单位 mg):
+// 摇晃:|a| 偏离 1g 超过 shakeMg 记一次,1 秒内 3 次触发;触发后 8 秒冷却(晕 3s + 冷却 5s)
+// 拿起:先静止 stillMs,之后三轴变化之和超过 pickupMg
+struct MotionDetector {
+  int shakeMg, pickupMg;
+  uint32_t stillMs;
+  int hits;
+  uint32_t hitWindowStart, cooldownUntil;
+  int refX, refY, refZ;
+  uint32_t stillSince;
+  bool still;
+  MotionDetector(int shakeMg_, int pickupMg_, uint32_t stillMs_)
+      : shakeMg(shakeMg_), pickupMg(pickupMg_), stillMs(stillMs_), hits(0), hitWindowStart(0),
+        cooldownUntil(0), refX(0), refY(0), refZ(1000), stillSince(0), still(false) {}
+  int update(int x, int y, int z, uint32_t now) {
+    const long mag2 = (long)x * x + (long)y * y + (long)z * z;
+    const long hiMag = 1000L + shakeMg;
+    const long loMag = (1000L - shakeMg) > 0 ? (1000L - shakeMg) : 0;
+    if (mag2 > hiMag * hiMag || mag2 < loMag * loMag) {
+      if (hits == 0 || now - hitWindowStart > 1000) {
+        hits = 0;
+        hitWindowStart = now;
+      }
+      hits++;
+      still = false;
+      stillSince = now;
+      refX = x; refY = y; refZ = z;
+      if (hits >= 3 && now >= cooldownUntil) {
+        hits = 0;
+        cooldownUntil = now + 8000;
+        return MOTION_SHAKE;
+      }
+      return MOTION_NONE;
+    }
+    const long d = labs((long)x - refX) + labs((long)y - refY) + labs((long)z - refZ);
+    if (d < pickupMg / 3) {  // 基本没动:累计静止
+      if (!still && now - stillSince >= stillMs) still = true;
+      return MOTION_NONE;
+    }
+    const bool fire = still && d > pickupMg;
+    still = false;
+    stillSince = now;
+    refX = x; refY = y; refZ = z;
+    return fire ? MOTION_PICKUP : MOTION_NONE;
+  }
+};
