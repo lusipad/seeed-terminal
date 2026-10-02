@@ -254,13 +254,14 @@ void drawBubbleText(const String& t1, uint16_t c1, const String& t2, uint16_t c2
   display.fillRoundRect(14, 6, 292, 98, 10, C_BUBBLE);
   display.drawRoundRect(14, 6, 292, 98, 10, TFT_BLACK);
   drawBubbleHead();
-  const int y = drawTextCJK(t1, 26, 14, 290, c1);
+  // 底色传气泡白:CJK 字形按行批量推送时背景像素会写屏,须与真实底色一致
+  const int y = drawTextCJK(t1, 26, 14, 290, c1, C_BUBBLE);
   if (t2.length()) {
     if (y < 56) {
       display.drawFastHLine(26, 52, 268, 0xBDF7);
-      drawTextCJK(t2, 26, 58, 290, c2);
+      drawTextCJK(t2, 26, 58, 290, c2, C_BUBBLE);
     } else {
-      drawTextCJK(t2, 26, y + 2, 290, c2);
+      drawTextCJK(t2, 26, y + 2, 290, c2, C_BUBBLE);
     }
   }
 }
