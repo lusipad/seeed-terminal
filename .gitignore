@@ -11,3 +11,6 @@ __pycache__/
 game-console/
 tools/ambd_flash_tool/
 .superpowers/
+
+# 示例目录的本地密钥(从 example 拷贝填写后同样不入库)
+libraries/WioKit/examples/VoiceEcho/wifi_secrets.h
