@@ -1,7 +1,7 @@
 #!/bin/bash
 # 等日志里出现匹配正则的行(最多 N 秒),然后打印所有匹配行
 # 用法: bash tools/wait_log.sh <正则> [秒数]
-LOG=/c/<user>/AppData/Local/Temp/wio_serial.log
+LOG="${WIO_LOG:-${TMPDIR:-/tmp}/wio_serial.log}"
 PAT="$1"
 MAX="${2:-60}"
 for _ in $(seq 1 "$MAX"); do

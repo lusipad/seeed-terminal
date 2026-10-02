@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""百度短语音识别 API 自测:token 获取 + WAV 转写(验证 Key 和接口格式)"""
+"""百度短语音识别 API 自测:token 获取 + WAV 转写(验证 Key 和接口格式)
+用法:先导出环境变量 BAIDU_API_KEY / BAIDU_SECRET_KEY,再运行本脚本。"""
 import base64
-import json
+import os
 import subprocess
 import sys
+import tempfile
 
 import requests
 
-API_KEY = "<REDACTED_BAIDU_API_KEY>"
-SECRET_KEY = "<REDACTED_BAIDU_SECRET_KEY>"
+API_KEY = os.environ.get("BAIDU_API_KEY", "")
+SECRET_KEY = os.environ.get("BAIDU_SECRET_KEY", "")
 
 
 def get_token():
@@ -60,10 +62,12 @@ def asr(token, wav_path):
 
 
 if __name__ == "__main__":
+    if not API_KEY or not SECRET_KEY:
+        sys.exit("缺少 BAIDU_API_KEY / BAIDU_SECRET_KEY 环境变量")
     token = get_token()
     if not token:
         sys.exit(1)
-    wav = r"C:\Users\lus\AppData\Local\Temp\baidu_test.wav"
+    wav = os.path.join(tempfile.gettempdir(), "baidu_test.wav")
     make_test_wav(wav)
     ok = asr(token, wav)
     print("== result ==", "OK" if ok else "FAIL")

@@ -4,8 +4,10 @@
 cd "$(dirname "$0")/.." || exit 1  # 编译参数用相对路径,须在仓库根执行
 SKETCH="${1:-console}"
 DUR="${2:-600}"
-LOG=/c/<user>/AppData/Local/Temp/wio_serial.log
-AC="/c/Program Files/Arduino CLI/arduino-cli.exe"
+LOG="${WIO_LOG:-${TMPDIR:-/tmp}/wio_serial.log}"
+# arduino-cli 默认从 PATH 找;Windows 典型安装路径兜底
+AC="${AC:-arduino-cli}"
+command -v "$AC" >/dev/null 2>&1 || AC="/c/Program Files/Arduino CLI/arduino-cli.exe"
 LIBS="--libraries libraries"  # WioKit 库(libraries/WioKit/),所有 sketch 共享一份源码
 
 # 1. 清掉占用串口的残留进程

@@ -34,7 +34,7 @@ Wio Terminal(SAMD51 + 2.4" 彩屏 + WiFi + 板载麦克风)改造成的**离线�
 
 - 板子:Wio Terminal,串口名会变(COM3/COM4 都出现过),**以 VID_2886 自动查找为准,不要写死**
 - 板子底部有两个 USB-C:一个连主控(串口/烧录用这个),另一个是无线模块固件下载口(插上电脑认不出串口)
-- WiFi:用户路由器双频,`<REDACTED_SSID>`(2.4G,**信道 12,板子连不上——区域码限制**)→ 用 5G 的 `<REDACTED_SSID>`(信道 44)
+- WiFi:用户路由器双频,`<路由器2.4G>`(2.4G,**信道 12,板子连不上——区域码限制**)→ 用 5G SSID(信道 44)
 - 密钥位置(均已 gitignore,**不要提交、不要外发**):
   - `pet/wifi_secrets.h`:WiFi + 百度 ASR(API Key/Secret)+ DeepSeek Key(已实测有效)
   - `libraries/WioKit/examples/VoiceEcho/wifi_secrets.h`:示例用,拷 pet 的即可
@@ -49,7 +49,7 @@ bash tools/flash_and_log.sh pet 600                     # 编译+烧录 pet + �
 bash tools/flash_and_log.sh none 300                    # 只听日志不烧录
 bash tools/flash_and_log.sh tests/pet_selftest 60       # L0 板上自检
 bash tools/flash_and_log.sh console 600                 # 菜单版控制台
-# 日志实时写:C:\Users\lus\AppData\Local\Temp\wio_serial.log(逐行落盘)
+# 日志实时写:$TMPDIR/wio_serial.log(即 Windows 用户 Temp,逐行落盘)
 ```
 
 - arduino-cli 在 `C:\Program Files\Arduino CLI\`,FQBN `Seeeduino:samd:seeed_wio_terminal`,

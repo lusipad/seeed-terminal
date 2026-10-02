@@ -1,0 +1,8 @@
+{
+  "_help": "拷贝为 config.json 再填值(config.json 不入库)。api_key 填智谱/DeepSeek 等 OpenAI 兼容接口的 Key;留空则 LLM 动作不可用(Hello Test 不需要)。api_key 优先读环境变量 GLM_API_KEY。",
+  "port": "COM3",
+  "baud": 115200,
+  "api_base": "https://api.deepseek.com/v1",
+  "model": "deepseek-chat",
+  "api_key": ""
+}

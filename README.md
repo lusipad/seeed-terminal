@@ -6,8 +6,10 @@
 |------|------|------|
 | `libraries/WioKit/` | **WioKit 基础功能库**(中文渲染/录音/网络/传感器/百度ASR/DeepSeek) | ✅ 已库化,pet 已迁入 |
 | `sketches/HelloWio/` | 第一个测试程序:LED 闪烁 + 串口心跳 | ✅ 已验证 |
-| `game-console/` | 官方游戏机(贪吃蛇/推箱子/俄罗斯方块/打砖块/传感器工具) | ✅ 已烧录 |
 | `console/` + `host/` | **桌面 AI 控制台**(见下文) | ✅ 已烧录 |
+| `diag/tlsdiag/` | TLS 连接诊断小品(排查板子到各端点的可达性) | ✅ 已验证 |
+
+> 另有 `game-console/`(Seeed 官方游戏机)仅本地保留,不入库。
 
 ## WioKit 库(libraries/WioKit/)
 

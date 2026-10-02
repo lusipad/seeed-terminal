@@ -14,3 +14,5 @@ tools/ambd_flash_tool/
 
 # 示例目录的本地密钥(从 example 拷贝填写后同样不入库)
 libraries/WioKit/examples/VoiceEcho/wifi_secrets.h
+# tlsdiag 的本地 WiFi 凭据(拷 pet/wifi_secrets.h 或按提示手填)
+diag/tlsdiag/wifi_secrets.h

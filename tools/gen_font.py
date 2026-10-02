@@ -9,8 +9,10 @@
 """
 import os
 
-SRC = r"D:\Repos\seeed-terminal\tools\HZK16.bin"
-OUT_PATH = r"D:\Repos\seeed-terminal\libraries\WioKit\src\WioKitFontHz16.h"
+HERE = os.path.dirname(os.path.abspath(__file__))
+SRC = os.path.join(HERE, "HZK16.bin")                       # 源字库
+REPO = os.path.dirname(HERE)                                # 仓库根
+OUT_PATH = os.path.join(REPO, "libraries", "WioKit", "src", "WioKitFontHz16.h")
 
 data = open(SRC, "rb").read()
 assert len(data) == 261696, f"unexpected HZK16 size {len(data)}"

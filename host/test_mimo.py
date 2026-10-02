@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""MiMo API 连通性自测:1) 大模型对话 2) TTS合成语音 -> ASR转写(模拟板子链路)"""
+"""MiMo API 连通性自测:1) 大模型对话 2) TTS合成语音 -> ASR转写(模拟板子链路)
+用法:先导出环境变量 MIMO_API_KEY,再运行本脚本。"""
 import base64
 import json
+import os
 import subprocess
 import sys
+import tempfile
 import wave
 
 import requests
 
 BASE = "https://api.xiaomimimo.com/v1"
-KEY = "<REDACTED_MIMO_API_KEY>"
+KEY = os.environ.get("MIMO_API_KEY", "")
 HDR = {"Authorization": f"Bearer {KEY}", "Content-Type": "application/json"}
 
 
@@ -82,7 +85,9 @@ def test_asr(wav_path):
 
 
 if __name__ == "__main__":
-    wav = r"C:\Users\lus\AppData\Local\Temp\mimo_test.wav"
+    if not KEY:
+        sys.exit("缺少 MIMO_API_KEY 环境变量")
+    wav = os.path.join(tempfile.gettempdir(), "mimo_test.wav")
     make_test_wav(wav)
     ok1 = test_chat()
     ok2 = test_asr(wav)

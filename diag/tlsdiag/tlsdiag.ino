@@ -3,8 +3,15 @@
 #include <rpcWiFi.h>
 #include <rpcWiFiClientSecure.h>
 
-const char* WIFI_SSID = "<REDACTED_SSID>";
-const char* WIFI_PASS = "<REDACTED_WIFI_PASS>";
+// WiFi 凭据由本目录 wifi_secrets.h 提供(拷 pet/wifi_secrets.h 过来即可,已被 gitignore);
+// 没有时在下面两行手动填——不要把真实密钥提交进仓库
+#if __has_include("wifi_secrets.h")
+#include "wifi_secrets.h"
+#else
+#define WIFI_SSID "你的WiFi名"
+#define WIFI_PASS "你的WiFi密码"
+#warning "tlsdiag: 未找到 wifi_secrets.h,请拷贝或手填 WiFi 凭据"
+#endif
 
 const char* TARGETS[] = {
   "openapi.baidu.com",  // 百度令牌接口(语音识别取 token)

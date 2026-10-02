@@ -59,7 +59,7 @@
 
 - 编译烧录 + 挂日志:`bash tools/flash_and_log.sh <sketch目录> <秒数>`(sketch 目录如 `pet`、`tests/pet_selftest`)
 - 只编译:`"/c/Program Files/Arduino CLI/arduino-cli.exe" compile --fqbn Seeeduino:samd:seeed_wio_terminal --build-path build/<名> <目录>`
-- 日志文件:`/c/<user>/AppData/Local/Temp/wio_serial.log`
+- 日志文件:`${TMPDIR:-/tmp}/wio_serial.log`
 - 等待日志:`bash tools/wait_log.sh '<正则>' <秒数>`(Claude Code 里用 `run_in_background` 运行)
 
 ---
@@ -200,7 +200,7 @@ Create `tools/wait_log.sh`:
 #!/bin/bash
 # 等日志里出现匹配正则的行(最多 N 秒),然后打印所有匹配行
 # 用法: bash tools/wait_log.sh <正则> [秒数]
-LOG=/c/<user>/AppData/Local/Temp/wio_serial.log
+LOG=${TMPDIR:-/tmp}/wio_serial.log
 PAT="$1"
 MAX="${2:-60}"
 for _ in $(seq 1 "$MAX"); do
@@ -2338,7 +2338,7 @@ void handleSense() {
 
 - [ ] **Step 8: 标定光线阈值(需用户配合)**
 
-在 `pet/pet_sense.h` 把 `#define PET_SENSE_DEBUG 0` 临时改为 `1`,运行 `bash tools/flash_and_log.sh pet 300`。请用户:正常开灯放置 20 秒 → 用手完全遮住屏幕下方的光线传感器 20 秒 → 关掉房间灯 20 秒(若方便)。然后 `grep -a "S: light=" /c/<user>/AppData/Local/Temp/wio_serial.log`。
+在 `pet/pet_sense.h` 把 `#define PET_SENSE_DEBUG 0` 临时改为 `1`,运行 `bash tools/flash_and_log.sh pet 300`。请用户:正常开灯放置 20 秒 → 用手完全遮住屏幕下方的光线传感器 20 秒 → 关掉房间灯 20 秒(若方便)。然后 `grep -a "S: light=" ${TMPDIR:-/tmp}/wio_serial.log`。
 据此设定:`PET_DARK_TH` = 关灯/遮住时读数上沿 + 20;`PET_LIGHT_TH` = 正常亮度读数下沿 − 20(必须满足 `PET_DARK_TH < PET_LIGHT_TH`)。把两个值写回 `pet_sense.h`,`PET_SENSE_DEBUG` 改回 `0`。
 
 - [ ] **Step 9: 真机验收 + 麦克风回归(需用户配合)**
@@ -2462,7 +2462,7 @@ Expected: `SELFTEST PASS 51/51`。
 
 - [ ] **Step 2: 10 轮稳定性 + 最终耗时(需用户配合)**
 
-Run: `bash tools/flash_and_log.sh pet 1800`。请用户连续对话 10 轮(内容随意)。然后 `grep -a "T: \|呜\|note" /c/<user>/AppData/Local/Temp/wio_serial.log` 统计。
+Run: `bash tools/flash_and_log.sh pet 1800`。请用户连续对话 10 轮(内容随意)。然后 `grep -a "T: \|呜\|note" ${TMPDIR:-/tmp}/wio_serial.log` 统计。
 Expected:
 - 10 轮中成功轮数 ≥ 基线时期的成功率(基线时期全部成功则要求 10/10)
 - 成功轮的中位 `total` 比基线中位 **至少少 5000ms**
