@@ -136,55 +136,74 @@ inline void wioMakeWavHeader(uint8_t h[44], uint32_t dataLen, uint32_t sampleRat
   v = dataLen; memcpy(h + 40, &v, 4);
 }
 
+// 预分配 HTTP 响应缓冲(性能铁律:收响应用预分配缓冲,库内不 malloc)。
+// 调用方持有存储并定容量(ASR 响应 ~1KB,LLM ~2KB,给余量即可);收满后
+// 正文被原地去头/chunked 解码,放在 buf 起始处,以 '\0' 结尾。
+struct HttpBuf {
+  char* buf;
+  size_t cap;
+  size_t len;
+  void bind(char* storage, size_t capacity) { buf = storage; cap = capacity; len = 0; }
+  const char* body() const { return buf; }
+};
+
 // 读一个 HTTP 响应:按 Content-Length / chunked 终止块判断收完立即返回;
-// 无长度信息或异常时退回"3 秒无新数据即收工"兜底。成功(200 且头完整)返回 true,body 为解码后的正文。
+// 无长度信息或异常时退回"3 秒无新数据即收工"兜底。成功(200 且头完整)返回 true,
+// 正文解码到 out(原地去头部:写指针永远不超过读指针)。
 template <typename ClientT>
-bool wioReadHttp(ClientT& client, String& body, uint32_t maxWaitMs, const char* label, bool keepOpen = false) {
-  String payload;
+bool wioReadHttp(ClientT& client, HttpBuf& out, uint32_t maxWaitMs, const char* label, bool keepOpen = false) {
+  out.len = 0;
   const unsigned long start = millis();
   size_t lastLen = 0;
   unsigned long lastGrowth = millis();
   int hs = HTTP_NEED_MORE;
-  while ((client.connected() || client.available()) && payload.length() < 16000) {
+  while ((client.connected() || client.available()) && out.len < out.cap - 1) {
     bool got = false;
-    while (client.available()) {
-      payload += (char)client.read();
+    while (client.available() && out.len < out.cap - 1) {
+      out.buf[out.len++] = (char)client.read();
       got = true;
     }
+    out.buf[out.len] = '\0';
     if (got) {
-      hs = httpResponseState(payload.c_str(), payload.length());
+      hs = httpResponseState(out.buf, out.len);
       if (hs == HTTP_DONE) break;  // 按协议收满,立即收工
     }
-    if (payload.length() != lastLen) {
-      lastLen = payload.length();
+    if (out.len != lastLen) {
+      lastLen = out.len;
       lastGrowth = millis();
     }
-    if (payload.length() > 0 && millis() - lastGrowth > 3000) break;  // 兜底
+    if (out.len > 0 && millis() - lastGrowth > 3000) break;  // 兜底
     if (millis() - start > maxWaitMs) break;
     wioNetYield();
     delay(5);
   }
   if (!keepOpen || hs != HTTP_DONE) client.stop();
-  const long headerEnd = httpHeaderEnd(payload.c_str(), payload.length());
-  if (payload.length() && headerEnd < 0) {
+  const long headerEnd = httpHeaderEnd(out.buf, out.len);
+  if (out.len && headerEnd < 0) {
     Serial.print("V: http raw=");
-    Serial.println(payload.substring(0, 170));  // 不完整响应:原样打印排查
+    Serial.write(out.buf, out.len < 170 ? out.len : 170);  // 不完整响应:原样打印排查
+    Serial.println();
   }
   Serial.print("V: http[");
   Serial.print(label);
   Serial.print("] wait=");
   Serial.print(millis() - start);
   Serial.print("ms len=");
-  Serial.print(payload.length());
+  Serial.print(out.len);
   Serial.print(" done=");
   Serial.println(hs);
   if (headerEnd < 0) return false;
-  if (!payload.startsWith("HTTP/1.1 200") && !payload.startsWith("HTTP/1.0 200")) return false;
-  body = payload.substring(headerEnd + 4);
-  if (httpIsChunked(payload.c_str(), (size_t)headerEnd)) {
+  if (memcmp(out.buf, "HTTP/1.1 200", 12) != 0 && memcmp(out.buf, "HTTP/1.0 200", 12) != 0) return false;
+  const size_t bodyStart = (size_t)headerEnd + 4;
+  const size_t bodyLen = out.len - bodyStart;
+  if (httpIsChunked(out.buf, (size_t)headerEnd)) {
     size_t decoded = 0;
-    if (!body.length() || !chunkedWalk(body.begin(), body.length(), body.begin(), &decoded)) return false;
-    body.remove(decoded);
+    if (!bodyLen || !chunkedWalk(out.buf + bodyStart, bodyLen, out.buf, &decoded)) return false;
+    out.len = decoded;
+  } else {
+    if (bodyStart) memmove(out.buf, out.buf + bodyStart, bodyLen);
+    out.len = bodyLen;
   }
+  out.buf[out.len] = '\0';
   return true;
 }

@@ -8,6 +8,9 @@
 static const char* llmKey = nullptr;
 static const char* llmSystemPrompt = nullptr;
 
+// 响应缓冲(预分配,调用方持有):LLM 回答 JSON 实测 1KB 量级,给余量
+static char llmHttpBuf[4096];
+
 void wioLlmDeepSeekBegin(const char* key, const char* systemPrompt) {
   llmKey = key;
   llmSystemPrompt = systemPrompt;
@@ -48,15 +51,16 @@ bool wioLlmAsk(const String& question, String& reply, String& note) {
   reqStr += body;
   client.print(reqStr);
 
-  String llmBody;
-  const bool ok = wioReadHttp(client, llmBody, 30000, "llm");
+  HttpBuf http;
+  http.bind(llmHttpBuf, sizeof(llmHttpBuf));
+  const bool ok = wioReadHttp(client, http, 30000, "llm");
   wioTiming().llm = millis() - tLlm;
   if (!ok) {
     note = "llm http error";
     return false;
   }
   JsonDocument ldoc;
-  if (deserializeJson(ldoc, llmBody)) {
+  if (deserializeJson(ldoc, http.body(), http.len)) {
     note = "llm bad json";
     return false;
   }

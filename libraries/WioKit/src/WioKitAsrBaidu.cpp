@@ -17,6 +17,10 @@ void wioAsrBaiduBegin(const char* apiKey, const char* secretKey) {
 
 void wioAsrBaiduDebugToken(const char* token) { baiduToken = token; }
 
+// 响应缓冲(预分配,调用方持有):token 响应与 ASR 响应实测都在 1KB 量级,给余量
+static char tokenHttpBuf[2048];
+static char asrHttpBuf[2048];
+
 static bool fetchBaiduToken() {
   if (baiduToken.length() > 10) return true;
   WiFiClientSecure client;
@@ -25,10 +29,11 @@ static bool fetchBaiduToken() {
                      asrApiKey + "&client_secret=" + asrSecretKey +
                      " HTTP/1.1\r\nHost: openapi.baidu.com\r\nConnection: close\r\n\r\n";
   client.print(req);
-  String body;
-  if (!wioReadHttp(client, body, 30000, "token")) return false;
+  HttpBuf http;
+  http.bind(tokenHttpBuf, sizeof(tokenHttpBuf));
+  if (!wioReadHttp(client, http, 30000, "token")) return false;
   JsonDocument doc;
-  if (deserializeJson(doc, body)) return false;
+  if (deserializeJson(doc, http.body(), http.len)) return false;
   baiduToken = String(doc["access_token"] | "");
   return baiduToken.length() > 10;
 }
@@ -71,16 +76,17 @@ static int baiduAsrOnce(const int16_t* pcm, uint32_t n, String& transcript, Stri
   Serial.print("V: wav uploaded ms=");
   Serial.println(wioTiming().upload);
 
-  String asrBody;
   const uint32_t tAsr = millis();
-  const bool ok = wioReadHttp(client, asrBody, 60000, "asr");
+  HttpBuf http;
+  http.bind(asrHttpBuf, sizeof(asrHttpBuf));
+  const bool ok = wioReadHttp(client, http, 60000, "asr");
   wioTiming().asr = millis() - tAsr;
   if (!ok) {
     note = "asr http error";
     return -1;
   }
   JsonDocument adoc;
-  if (deserializeJson(adoc, asrBody)) {
+  if (deserializeJson(adoc, http.body(), http.len)) {
     note = "asr bad json";
     return -1;
   }
