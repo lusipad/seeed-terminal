@@ -7,6 +7,7 @@
 #include <WioKitLogic.h>  // L0 纯逻辑(HTTP 判停/chunked/情绪标签/探测器)
 #include <WioKitCjk.h>    // L1 中文渲染(字库在库里,~150KB Flash)
 #include <WioKitMic.h>    // L1 麦克风 DMA 录音 + VAD
+#include <WioKitSense.h>  // L1 光线 + IMU(判定逻辑在 WioKitLogic)
 
 const uint32_t PET_TRAILING_MS = 900;  // 说完静音多久自动停(实测可调,与库内 VAD 配套)
 
@@ -27,7 +28,6 @@ void beep(int freq, int dur) {
 }
 
 #include "voice_pet.h"  // 语音链路(百度ASR/DeepSeek;录音/网络已进 WioKit 库)
-#include "pet_sense.h"  // 光线 + IMU
 
 // ============================================================
 // 状态机
@@ -116,7 +116,7 @@ void startDizzy() {
 // 传感器事件:只在 IDLE / SHOW / SLEEP 处理;录音、思考时不采样
 void handleSense() {
   if (state != ST_IDLE && state != ST_SHOW && state != ST_SLEEP) return;
-  const int ev = petSensePoll();
+  const int ev = wioSensePoll();
   if (ev == SE_NONE) return;
   Serial.print("S: event=");
   Serial.println(ev);
@@ -158,7 +158,7 @@ void setup() {
   wioMicConfig(400, PET_TRAILING_MS, 8000);  // 静音阈值 / 截断静音时长 / 没说话超时
   wioNetSetYield(petAnimTick);  // 解耦点②:网络等待期间动画照常
   wioNetBegin(WIFI_SSID, WIFI_PASS);  // 解耦点③:密钥由应用注入,库永不含密钥
-  petSenseBegin();  // (下一步迁移到 WioKitSense)
+  wioSenseBegin();
   Serial.println("HELLO pet 1.2");
   drawPet(F_SLEEP);
   drawTextCJK("小维醒来中…正在连网", 84, 220, 320, TFT_DARKGREY);

@@ -1,33 +1,34 @@
-// ---- 传感器:光线(关灯睡觉)+ IMU(摇晃/拿起);判定逻辑在 WioKitLogic.h(L0) ----
-// 只在 IDLE / SHOW / SLEEP 状态调用 petSensePoll(录音时不碰 ADC,避免干扰麦克风 DMA)
-#pragma once
-#include <Arduino.h>
+#include "WioKitSense.h"
 #include <WioKitLogic.h>
 #include <LIS3DHTR.h>
 #include "wiring_private.h"  // pinPeripheral
 
-enum SenseEvent { SE_NONE, SE_DARK, SE_LIGHT, SE_SHAKE, SE_PICKUP };
+// 默认阈值与 pet 迁移前一致;wioSenseConfig() 可调
+static const int DARK_TH = 60;
+static const int LIGHT_TH = 120;
+static const int SHAKE_MG = 800;
+static const int PICKUP_MG = 300;
+static const uint32_t STILL_MS = 3000;
 
-// 光线阈值(0-1023,越小越暗):把 PET_SENSE_DEBUG 设 1,看日志 "S: light=" 实测后改
-const int PET_DARK_TH = 60;
-const int PET_LIGHT_TH = 120;
-#define PET_LIGHT_ENABLED 0  // 光线读数在麦克风共用 ADC1 时尚不可靠(恒为 ~1),确认前不让它触发睡觉/唤醒
-#ifndef PET_SENSE_DEBUG
-#define PET_SENSE_DEBUG 1  // 1 = 每 2 秒打印光线与加速度,用于标定
-#endif
+static LIS3DHTR<TwoWire> lis;
+static bool imuOk = false;
+static LightDetector lightDet(DARK_TH, LIGHT_TH, 10000, 2000);
+static MotionDetector motionDet(SHAKE_MG, PICKUP_MG, STILL_MS);
+static unsigned long lightNext = 0, imuNext = 0, senseDbgNext = 0;
+static long lightAvg = -1;
+static int lastAx = 0, lastAy = 0, lastAz = 0;
 
-LIS3DHTR<TwoWire> lis;
-bool imuOk = false;
-LightDetector lightDet(PET_DARK_TH, PET_LIGHT_TH, 10000, 2000);
-MotionDetector motionDet(800, 300, 3000);
-unsigned long lightNext = 0, imuNext = 0, senseDbgNext = 0;
-long lightAvg = -1;
-int lastAx = 0, lastAy = 0, lastAz = 0;
+void wioSenseConfig(int darkTh, int lightTh, int shakeMg, int pickupMg, uint32_t stillMs) {
+  lightDet.darkTh = darkTh;
+  lightDet.lightTh = lightTh;
+  motionDet.shakeMg = shakeMg;
+  motionDet.pickupMg = pickupMg;
+  motionDet.stillMs = stillMs;
+}
 
 // 光线传感器(PD01/AIN15)与麦克风(AIN12)共用 ADC1:麦克风让 ADC1 自由运行 + DMA 持续搬运。
-// 不能用 analogRead —— 它会改通道并在读完后关掉 ADC1,麦克风随之停摆。
 // 这里临时把通道切到光线(并加长采样时间)、等几次转换、读结果,再恢复麦克风的设置;ADC1 全程不停。
-int readLightShared() {
+static int readLightShared() {
   const uint8_t micCh = g_APinDescription[WIO_MIC].ulADCChannelNumber;
   const uint8_t micSamplen = ADC1->SAMPCTRL.bit.SAMPLEN;
   ADC1->SAMPCTRL.bit.SAMPLEN = 63;  // 光敏电路内阻高:麦克风设的最短采样时间充不满采样电容,读数会接近 0
@@ -47,7 +48,7 @@ int readLightShared() {
   return v >> 2;  // 折算成 0-1023,与阈值量程一致
 }
 
-void petSenseBegin() {
+bool wioSenseBegin() {
   pinPeripheral(WIO_LIGHT, PIO_ANALOG);
   lis.begin(Wire1);
   imuOk = lis.isConnection();
@@ -56,10 +57,11 @@ void petSenseBegin() {
     lis.setFullScaleRange(LIS3DHTR_RANGE_2G);
   }
   Serial.println(imuOk ? "S: imu ok" : "S: imu FAIL (shake/pickup disabled)");
+  return imuOk;
 }
 
 // 非阻塞:到采样时间才读;每次最多返回一个事件
-int petSensePoll() {
+int wioSensePoll() {
   const unsigned long now = millis();
   int ev = SE_NONE;
   if (now >= lightNext) {
@@ -67,7 +69,7 @@ int petSensePoll() {
     const int raw = readLightShared();
     lightAvg = (lightAvg < 0) ? raw : (lightAvg * 3 + raw) / 4;
     const int r = lightDet.update((int)lightAvg, (uint32_t)now);
-#if PET_LIGHT_ENABLED
+#if WIO_SENSE_LIGHT_ENABLED
     if (r == 1) ev = SE_DARK;
     else if (r == 2) ev = SE_LIGHT;
 #else
@@ -83,7 +85,7 @@ int petSensePoll() {
     if (m == MOTION_SHAKE) ev = SE_SHAKE;
     else if (m == MOTION_PICKUP && ev == SE_NONE) ev = SE_PICKUP;
   }
-#if PET_SENSE_DEBUG
+#if WIO_SENSE_DEBUG
   if (now >= senseDbgNext) {
     senseDbgNext = now + 2000;
     Serial.print("S: light=");
