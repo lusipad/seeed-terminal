@@ -22,6 +22,7 @@
 #if PET_HAS_WIFI
 
 #include <WioKitMic.h>
+#include <WioKitNet.h>  // WiFi/HTTP/b64(L1);等待循环经 wioNetYield 回调 petAnimTick
 
 const uint32_t PET_SAMPLE_RATE = 16000;
 
@@ -46,159 +47,6 @@ void petPrintTiming(uint32_t processMs) {
   Serial.println(PET_TRAILING_MS + processMs);
 }
 
-const char B64TAB[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-struct B64State { uint8_t carry[2]; uint8_t ncarry; };
-char b64Out[1024];
-size_t b64OutLen = 0;
-
-template <typename ClientT>
-void b64OutPush(ClientT& client, const char* g) {
-  if (b64OutLen + 4 > sizeof(b64Out)) {
-    client.write((const uint8_t*)b64Out, b64OutLen);
-    b64OutLen = 0;
-    petAnimTick();  // 每写出 1KB 让动画走一帧
-  }
-  memcpy(b64Out + b64OutLen, g, 4);
-  b64OutLen += 4;
-}
-
-template <typename ClientT>
-void b64OutFlush(ClientT& client) {
-  if (b64OutLen) {
-    client.write((const uint8_t*)b64Out, b64OutLen);
-    b64OutLen = 0;
-  }
-}
-
-template <typename ClientT>
-void b64Write(ClientT& client, B64State& st, const uint8_t* data, size_t len) {
-  uint8_t grp[3];
-  size_t i = 0;
-  while (true) {
-    uint8_t n = st.ncarry;
-    if (n > 0) { grp[0] = st.carry[0]; if (n > 1) grp[1] = st.carry[1]; }
-    while (n < 3 && i < len) grp[n++] = data[i++];
-    if (n == 0) break;
-    if (n == 3) {
-      const uint32_t v = ((uint32_t)grp[0] << 16) | ((uint32_t)grp[1] << 8) | grp[2];
-      const char out[4] = {B64TAB[(v >> 18) & 63], B64TAB[(v >> 12) & 63], B64TAB[(v >> 6) & 63], B64TAB[v & 63]};
-      b64OutPush(client, out);
-      st.ncarry = 0;
-      if (i >= len) break;
-    } else {
-      st.carry[0] = grp[0]; st.carry[1] = grp[1]; st.ncarry = n;
-      break;
-    }
-  }
-}
-
-template <typename ClientT>
-void b64Flush(ClientT& client, B64State& st) {
-  if (st.ncarry) {
-    uint32_t v = (uint32_t)st.carry[0] << 16;
-    if (st.ncarry > 1) v |= (uint32_t)st.carry[1] << 8;
-    const char out[4] = {B64TAB[(v >> 18) & 63], B64TAB[(v >> 12) & 63], st.ncarry > 1 ? B64TAB[(v >> 6) & 63] : '=', '='};
-    b64OutPush(client, out);
-    st.ncarry = 0;
-  }
-  b64OutFlush(client);
-}
-
-void makeWavHeader(uint8_t h[44], uint32_t dataLen) {
-  memcpy(h, "RIFF", 4);
-  uint32_t v = 36 + dataLen; memcpy(h + 4, &v, 4);
-  memcpy(h + 8, "WAVE", 4);
-  memcpy(h + 12, "fmt ", 4);
-  v = 16; memcpy(h + 16, &v, 4);
-  h[20] = 1; h[21] = 0;
-  h[22] = 1; h[23] = 0;
-  v = PET_SAMPLE_RATE; memcpy(h + 24, &v, 4);
-  v = PET_SAMPLE_RATE * 2; memcpy(h + 28, &v, 4);
-  h[32] = 2; h[33] = 0;
-  h[34] = 16; h[35] = 0;
-  memcpy(h + 36, "data", 4);
-  v = dataLen; memcpy(h + 40, &v, 4);
-}
-
-// 读一个 HTTP 响应:按 Content-Length / chunked 终止块判断收完立即返回;
-// 无长度信息或异常时退回"3 秒无新数据即收工"兜底。成功(200 且头完整)返回 true,body 为解码后的正文。
-template <typename ClientT>
-bool readHttpBody(ClientT& client, String& body, uint32_t maxWaitMs, const char* label, bool keepOpen = false) {
-  String payload;
-  const unsigned long start = millis();
-  size_t lastLen = 0;
-  unsigned long lastGrowth = millis();
-  int hs = HTTP_NEED_MORE;
-  while ((client.connected() || client.available()) && payload.length() < 16000) {
-    bool got = false;
-    while (client.available()) {
-      payload += (char)client.read();
-      got = true;
-    }
-    if (got) {
-      hs = httpResponseState(payload.c_str(), payload.length());
-      if (hs == HTTP_DONE) break;  // 按协议收满,立即收工
-    }
-    if (payload.length() != lastLen) {
-      lastLen = payload.length();
-      lastGrowth = millis();
-    }
-    if (payload.length() > 0 && millis() - lastGrowth > 3000) break;  // 兜底
-    if (millis() - start > maxWaitMs) break;
-    petAnimTick();
-    delay(5);
-  }
-  if (!keepOpen || hs != HTTP_DONE) client.stop();
-  const long headerEnd = httpHeaderEnd(payload.c_str(), payload.length());
-  if (payload.length() && headerEnd < 0) {
-    Serial.print("V: http raw=");
-    Serial.println(payload.substring(0, 170));  // 不完整响应:原样打印排查
-  }
-  Serial.print("V: http[");
-  Serial.print(label);
-  Serial.print("] wait=");
-  Serial.print(millis() - start);
-  Serial.print("ms len=");
-  Serial.print(payload.length());
-  Serial.print(" done=");
-  Serial.println(hs);
-  if (headerEnd < 0) return false;
-  if (!payload.startsWith("HTTP/1.1 200") && !payload.startsWith("HTTP/1.0 200")) return false;
-  body = payload.substring(headerEnd + 4);
-  if (httpIsChunked(payload.c_str(), (size_t)headerEnd)) {
-    size_t decoded = 0;
-    if (!body.length() || !chunkedWalk(body.begin(), body.length(), body.begin(), &decoded)) return false;
-    body.remove(decoded);
-  }
-  return true;
-}
-
-bool wifiPetConnected(int attempts = 3) {
-  if (WiFi.status() == WL_CONNECTED) return true;
-  Serial.print("V: wifi begin ssid=\"");
-  Serial.print(WIFI_SSID);
-  Serial.println("\"");
-  for (int attempt = 1; attempt <= attempts; attempt++) {
-    WiFi.begin(WIFI_SSID, WIFI_PASS);
-    const unsigned long start = millis();
-    while (WiFi.status() != WL_CONNECTED) {
-      if (millis() - start > 15000) break;
-      for (int k = 0; k < 50; k++) {  // 等 500ms,期间动画照常
-        petAnimTick();
-        delay(10);
-      }
-    }
-    if (WiFi.status() == WL_CONNECTED) {
-      Serial.print("V: wifi OK ip=");
-      Serial.println(WiFi.localIP());
-      return true;
-    }
-    WiFi.disconnect();
-    delay(1500);
-  }
-  return false;
-}
-
 String baiduToken = "";
 
 bool fetchBaiduToken() {
@@ -210,7 +58,7 @@ bool fetchBaiduToken() {
                      " HTTP/1.1\r\nHost: openapi.baidu.com\r\nConnection: close\r\n\r\n";
   client.print(req);
   String body;
-  if (!readHttpBody(client, body, 30000, "token")) return false;
+  if (!wioReadHttp(client, body, 30000, "token")) return false;
   JsonDocument doc;
   if (deserializeJson(doc, body)) return false;
   baiduToken = String(doc["access_token"] | "");
@@ -223,7 +71,7 @@ void petNetWarmup() {
 #if PET_TEST_OFFLINE
   const bool ok = false;  // 测试:模拟开机时无网
 #else
-  const bool ok = wifiPetConnected(1) && fetchBaiduToken();
+  const bool ok = wioNetConnected(1) && fetchBaiduToken();
 #endif
   Serial.print("V: warmup ");
   Serial.print(ok ? "ok" : "failed");
@@ -259,14 +107,14 @@ int baiduAsrOnce(uint32_t lo, uint32_t n, String& transcript, String& note) {
   req += "\r\n\r\n";
   client.print(req);
   client.print(head);
-  B64State st = {{0, 0}, 0};
+  B64Stream<WiFiClient> b64(client);
   const uint32_t upT = millis();
   // WAV 头 + int16 小端 PCM,必须 flush,否则实际字节数少于 Content-Length,服务器会一直等
   uint8_t wavHead[44];
-  makeWavHeader(wavHead, 2 * n);
-  b64Write(client, st, wavHead, 44);
-  b64Write(client, st, (const uint8_t*)(wioRecBuffer() + lo), 2 * n);
-  b64Flush(client, st);
+  wioMakeWavHeader(wavHead, 2 * n, PET_SAMPLE_RATE);
+  b64.write(wavHead, 44);
+  b64.write((const uint8_t*)(wioRecBuffer() + lo), 2 * n);
+  b64.flush();
   client.print(tail);
   petTm.upload = millis() - upT;
   Serial.print("V: wav uploaded ms=");
@@ -274,7 +122,7 @@ int baiduAsrOnce(uint32_t lo, uint32_t n, String& transcript, String& note) {
 
   String asrBody;
   const uint32_t tAsr = millis();
-  const bool ok = readHttpBody(client, asrBody, 60000, "asr");
+  const bool ok = wioReadHttp(client, asrBody, 60000, "asr");
   petTm.asr = millis() - tAsr;
   if (!ok) {
     note = "asr http error";
@@ -328,7 +176,7 @@ bool petAskLlm(const String& question, String& reply, int& emotion, String& note
   client2.print(req2s);
 
   String llmBody;
-  const bool ok = readHttpBody(client2, llmBody, 30000, "llm");
+  const bool ok = wioReadHttp(client2, llmBody, 30000, "llm");
   petTm.llm = millis() - tLlm;
   if (!ok) {
     note = "llm http error";
@@ -361,7 +209,7 @@ bool petProcessVoice(uint32_t samples, String& transcript, String& reply, int& e
   petTm = {0, 0, 0, 0, 0};
 
   const uint32_t tNet = millis();
-  if (!wifiPetConnected()) {
+  if (!wioNetConnected()) {
     note = "wifi failed";
     return false;
   }

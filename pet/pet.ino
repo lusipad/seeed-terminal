@@ -26,7 +26,7 @@ void beep(int freq, int dur) {
   tone(WIO_BUZZER, freq, dur);
 }
 
-#include "voice_pet.h"  // 语音链路(麦克风 DMA/百度ASR/DeepSeek)
+#include "voice_pet.h"  // 语音链路(百度ASR/DeepSeek;录音/网络已进 WioKit 库)
 #include "pet_sense.h"  // 光线 + IMU
 
 // ============================================================
@@ -156,6 +156,8 @@ void setup() {
   randomSeed(analogRead(A0) ^ micros());
   wioMicBegin();
   wioMicConfig(400, PET_TRAILING_MS, 8000);  // 静音阈值 / 截断静音时长 / 没说话超时
+  wioNetSetYield(petAnimTick);  // 解耦点②:网络等待期间动画照常
+  wioNetBegin(WIFI_SSID, WIFI_PASS);  // 解耦点③:密钥由应用注入,库永不含密钥
   petSenseBegin();  // (下一步迁移到 WioKitSense)
   Serial.println("HELLO pet 1.2");
   drawPet(F_SLEEP);
