@@ -1,6 +1,5 @@
 // ---- AI 桌宠语音链路 ----
-// 录音:官方 Seeed Arduino Mic 库(DMA 16bit 采样 + 高通滤波),按一下就录,
-//       由 pet.ino 轮询声能自动截断;识别百度,回答 DeepSeek,结果引用返回。
+// 识别百度,回答 DeepSeek,结果引用返回;录音在 WioKitMic(L1),经 wioRecBuffer 零拷贝取用。
 
 #include <Arduino.h>
 #ifndef PET_TEST_OFFLINE
@@ -22,21 +21,9 @@
 
 #if PET_HAS_WIFI
 
-#include <mic.h>
-#include "processing/filters.h"
+#include <WioKitMic.h>
 
 const uint32_t PET_SAMPLE_RATE = 16000;
-const uint32_t PET_MAX_SAMPLES = 48000;  // 3 秒
-int16_t petPcm[PET_MAX_SAMPLES];
-
-volatile uint16_t micIdx = 0;
-volatile uint8_t micRecording = 0;
-volatile bool micDone = false;
-FilterBuHp micFilter;
-
-const int PET_SILENCE_AVG = 400;   // 16bit 尺度:低于此视为静音(可调)
-const uint32_t PET_TRAILING_MS = 900;  // 说完静音多久自动停(实测可调)
-const uint32_t PET_NO_SPEECH_MS = 8000;
 
 // 每轮对话各阶段耗时(ms);pet.ino 在每轮结束调用 petPrintTiming 打印 "T:" 行
 struct PetTiming { uint32_t net, upload, asr, llmConn, llm; };
@@ -57,87 +44,6 @@ void petPrintTiming(uint32_t processMs) {
   Serial.print(petTm.llm);
   Serial.print(" total=");
   Serial.println(PET_TRAILING_MS + processMs);
-}
-
-mic_config_t mic_config{
-  .channel_cnt = 1,
-  .sampling_rate = PET_SAMPLE_RATE,
-  .buf_size = 320,
-  .debug_pin = 1,
-};
-DMA_ADC_Class Mic(&mic_config);
-
-static void audio_rec_callback(uint16_t* buf, uint32_t buf_len) {
-  if (!micRecording) return;
-  for (uint32_t i = 0; i < buf_len; i++) {
-    // 12bit 无偏 ADC(中点 1024)转 16bit PCM,过高通去直流
-    petPcm[micIdx++] = micFilter.step((int16_t)(buf[i] - 1024) * 16);
-    if (micIdx >= PET_MAX_SAMPLES) {
-      micRecording = 0;
-      micDone = true;
-      break;
-    }
-  }
-}
-
-void petMicBegin() {
-  Mic.set_callback(audio_rec_callback);
-  if (!Mic.begin()) {
-    Serial.println("V: mic init FAIL");
-  } else {
-    Serial.println("V: mic init ok");
-  }
-}
-
-void petRecStart() {
-  micIdx = 0;
-  micDone = false;
-  micRecording = 1;
-}
-
-// 轮询:返回 0=还在录 1=录完(结束) 2=超时没说话
-int petRecPoll(uint32_t& samples, uint32_t& speechHint) {
-  const int window = (micIdx < 1600) ? micIdx : 1600;
-  uint32_t sum = 0;
-  for (int i = 0; i < window; i++) {
-    const int16_t v = petPcm[micIdx - 1 - i];
-    sum += (v < 0) ? -v : v;
-  }
-  const uint32_t avg = window ? sum / window : 0;
-  const bool voiced = (avg > PET_SILENCE_AVG);
-  static bool speechSeen = false;
-  static uint32_t lastVoice = 0;
-  static uint32_t recStart = 0;
-  static uint32_t lastPoll = 0;
-
-  if (millis() - lastPoll < 100) return 0;
-  lastPoll = millis();
-
-  if (voiced) {
-    speechHint += window;
-    if (!speechSeen) { recStart = millis(); speechSeen = true; }
-    lastVoice = millis();
-  }
-
-  if (micDone) {  // 缓冲录满
-    micRecording = 0;
-    samples = micIdx;
-    speechSeen = false;
-    return 1;
-  }
-  if (speechSeen && millis() - lastVoice > PET_TRAILING_MS) {  // 说完,自动截断
-    micRecording = 0;
-    samples = micIdx;
-    speechSeen = false;
-    return 1;
-  }
-  if (millis() - recStart > PET_NO_SPEECH_MS) {  // 一直没说话
-    micRecording = 0;
-    samples = micIdx;
-    speechSeen = false;
-    return 2;
-  }
-  return 0;
 }
 
 const char B64TAB[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -359,7 +265,7 @@ int baiduAsrOnce(uint32_t lo, uint32_t n, String& transcript, String& note) {
   uint8_t wavHead[44];
   makeWavHeader(wavHead, 2 * n);
   b64Write(client, st, wavHead, 44);
-  b64Write(client, st, (const uint8_t*)(petPcm + lo), 2 * n);
+  b64Write(client, st, (const uint8_t*)(wioRecBuffer() + lo), 2 * n);
   b64Flush(client, st);
   client.print(tail);
   petTm.upload = millis() - upT;
@@ -467,8 +373,7 @@ bool petProcessVoice(uint32_t samples, String& transcript, String& reply, int& e
 
   // 静音裁剪:去掉首尾低于阈值的段,只留有效语音(+100ms 余量)
   uint32_t lo = 0, hi = samples;
-  while (lo < hi && abs(petPcm[lo]) < 400) lo++;
-  while (hi > lo + 1600 && abs(petPcm[hi - 1]) < 400) hi--;
+  wioRecTrim(lo, hi);
   if (hi - lo < 3200) { lo = 0; hi = samples; }  // 太短就整段
   const uint32_t n = hi - lo;
   Serial.print("V: trimmed ");

@@ -6,6 +6,9 @@
 #include <Seeed_GFX.h>
 #include <WioKitLogic.h>  // L0 纯逻辑(HTTP 判停/chunked/情绪标签/探测器)
 #include <WioKitCjk.h>    // L1 中文渲染(字库在库里,~150KB Flash)
+#include <WioKitMic.h>    // L1 麦克风 DMA 录音 + VAD
+
+const uint32_t PET_TRAILING_MS = 900;  // 说完静音多久自动停(实测可调,与库内 VAD 配套)
 
 Seeed_GFX display(Seeed_Product::Wio_Terminal);
 #include "pet_face.h"
@@ -151,8 +154,9 @@ void setup() {
   }
   wioCjkBegin(display);  // 注入 display(解耦点①),之后 drawTextCJK 全局可用
   randomSeed(analogRead(A0) ^ micros());
-  petMicBegin();
-  petSenseBegin();
+  wioMicBegin();
+  wioMicConfig(400, PET_TRAILING_MS, 8000);  // 静音阈值 / 截断静音时长 / 没说话超时
+  petSenseBegin();  // (下一步迁移到 WioKitSense)
   Serial.println("HELLO pet 1.2");
   drawPet(F_SLEEP);
   drawTextCJK("小维醒来中…正在连网", 84, 220, 320, TFT_DARKGREY);
@@ -204,7 +208,7 @@ void loop() {
       }
       if (pressed(PIN_KEY_B)) {
         lastInteract = millis();
-        petRecStart();
+        wioRecStart();
         state = ST_RECORD;
         stateStart = millis();
         drawPet(F_LISTEN);
@@ -217,7 +221,7 @@ void loop() {
 
     case ST_RECORD: {
       uint32_t samples = 0, hint = 0;
-      const int st = petRecPoll(samples, hint);
+      const int st = wioRecPoll(samples, hint);
       if (st == 2) {  // 超时没说话
         beep(196, 250);
         enterShow(F_SAD, "你还没说话呢~", TFT_BLACK, "按一下 B 再开口就好", 15000);
