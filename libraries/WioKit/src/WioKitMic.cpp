@@ -86,11 +86,11 @@ int wioRecPoll(uint32_t& samples, uint32_t& speechHint) {
     lastVoice = millis();
   }
 
-  if (micDone) {  // 缓冲录满
+  if (micDone) {  // 缓冲录满(达到 3 秒上限强行截断)
     micRecording = 0;
     samples = micIdx;
     speechSeen = false;
-    return 1;
+    return 3;
   }
   if (speechSeen && millis() - lastVoice > micTrailingMs) {  // 说完,自动截断
     micRecording = 0;

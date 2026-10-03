@@ -18,7 +18,7 @@ void wioMicConfig(int silenceAvg, uint32_t trailingMs, uint32_t noSpeechMs);
 
 void wioRecStart();
 
-// 轮询:0=录音中 1=录完(VAD 截断或缓冲录满) 2=超时没说话
+// 轮询:0=录音中 1=录完(VAD 截断) 2=超时没说话 3=缓冲录满(达到 3 秒上限截断)
 // samples=本次有效样本数;hint=累计有声样本数(应用可忽略)
 int wioRecPoll(uint32_t& samples, uint32_t& hint);
 

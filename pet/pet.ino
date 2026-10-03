@@ -50,7 +50,7 @@ void beep(int freq, int dur) {
   tone(WIO_BUZZER, freq, dur);
 }
 
-const uint32_t PET_TRAILING_MS = 900;  // 说完静音多久自动停(实测可调,与库内 VAD 配套)
+const uint32_t PET_TRAILING_MS = 1200;  // 说完静音多久自动停(放宽到1.2s,避免换气断句)
 
 // ============================================================
 // 语音链路编排(应用层):裁剪 → 识别 → 回答 → 情绪标签
@@ -62,6 +62,31 @@ const char* const PET_SYSTEM_PROMPT =
     "你是电子桌宠\"小维\",性格活泼元气,说话简短、口语化、爱用感叹号。"
     "回答必须以情绪标签开头,格式如 [开心],情绪只能从 开心/兴奋/惊讶/害羞/疑惑/难过 里选一个;"
     "标签后直接是回答正文,用简体中文,45字以内,不要任何其他前缀或解释。";
+
+// ---- 多轮对话上下文 (保存最近 2 轮对答 = 4 条消息: user, assistant, user, assistant) ----
+const size_t MAX_HISTORY_MSGS = 4;
+static WioLlmMsg chatHistory[MAX_HISTORY_MSGS];
+static size_t chatHistoryCount = 0;
+static uint32_t lastChatTime = 0;
+const uint32_t CHAT_CONTEXT_EXPIRE_MS = 90000;  // 90秒不说话则上下文自动重置
+
+void clearChatHistory() {
+  chatHistoryCount = 0;
+}
+
+void addChatHistory(const String& userText, const String& assistantText) {
+  if (chatHistoryCount + 2 <= MAX_HISTORY_MSGS) {
+    chatHistory[chatHistoryCount++] = {"user", userText};
+    chatHistory[chatHistoryCount++] = {"assistant", assistantText};
+  } else {
+    for (size_t i = 2; i < chatHistoryCount; i++) {
+      chatHistory[i - 2] = chatHistory[i];
+    }
+    chatHistory[chatHistoryCount - 2] = {"user", userText};
+    chatHistory[chatHistoryCount - 1] = {"assistant", assistantText};
+  }
+  lastChatTime = millis();
+}
 
 // 每轮结束打印 "T:" 行(格式不变,性能基线可对比)
 void petPrintTiming(uint32_t processMs) {
@@ -97,7 +122,7 @@ void petNetWarmup() {
 
 // 识别 + 回答(阻塞,数秒):成功 true;transcript/reply/note 填充。
 // 连网/令牌/失效重取在 wioAsrBaidu 内部;情绪标签解析在这里做(标签属于小维人设,不在库)
-bool petProcessVoice(uint32_t samples, String& transcript, String& reply, int& emotion, String& note) {
+bool petProcessVoice(uint32_t samples, bool bufferFull, String& transcript, String& reply, int& emotion, String& note) {
   transcript = "";
   reply = "";
   note = "";
@@ -114,12 +139,24 @@ bool petProcessVoice(uint32_t samples, String& transcript, String& reply, int& e
   Serial.print(" -> ");
   Serial.println(n);
 
-  if (!wioAsrBaidu(wioRecBuffer() + lo, n, transcript, note)) return false;
+  if (!wioAsrBaidu(wioRecBuffer() + lo, n, transcript, note)) {
+    if (bufferFull) {
+      note = "asr buffer full";
+    }
+    return false;
+  }
   if (strlen(DEEPSEEK_KEY) < 5) {
     return true;  // 只识别,无回答
   }
+
+  // 90 秒无互动则清除过期历史
+  if (chatHistoryCount > 0 && millis() - lastChatTime > CHAT_CONTEXT_EXPIRE_MS) {
+    clearChatHistory();
+    Serial.println("P: chat context expired");
+  }
+
   String raw;
-  if (!wioLlmAsk(transcript, raw, note)) return false;
+  if (!wioLlmAskWithHistory(chatHistory, chatHistoryCount, transcript, raw, note)) return false;
   size_t textStart = 0;
   emotion = parseEmotionTag(raw.c_str(), raw.length(), &textStart);
   reply = raw.substring(textStart);  // 标签不上屏
@@ -127,15 +164,20 @@ bool petProcessVoice(uint32_t samples, String& transcript, String& reply, int& e
     note = "llm empty reply";
     return false;
   }
+
+  // 记录本轮对话进多轮上下文
+  addChatHistory(transcript, reply);
   return true;
 }
 
 #else  // !PET_HAS_WIFI:离线宠物,宠物行为照常,B 键按下后走"连不上网"提示
 
+inline void clearChatHistory() {}
 void petPrintTiming(uint32_t processMs) { (void)processMs; }
 void petNetWarmup() {}
-bool petProcessVoice(uint32_t samples, String& transcript, String& reply, int& emotion, String& note) {
+bool petProcessVoice(uint32_t samples, bool bufferFull, String& transcript, String& reply, int& emotion, String& note) {
   (void)samples;
+  (void)bufferFull;
   transcript = "";
   reply = "";
   emotion = EMO_HAPPY;
@@ -154,6 +196,7 @@ PetState state = ST_IDLE;
 unsigned long stateStart = 0;
 unsigned long showUntil = 0;
 uint32_t recSamples = 0;
+bool recBufferFull = false;
 unsigned long lastInteract = 0;              // 最近一次有人互动(按键/摸头/拿起)
 const unsigned long PET_DROWSY_MS = 180000;  // 3 分钟没人理 → 犯困
 const unsigned long PET_SLEEP_MS = 300000;   // 5 分钟 → 睡觉
@@ -170,6 +213,7 @@ const int EMO_FACE[6] = {F_HAPPY, F_EXCITED, F_SURPRISED, F_SHY, F_CONFUSED, F_S
 
 // 把技术性 note 翻成小维口吻(原 note 仍显示在第二行,方便排查)
 String friendlyNote(const String& note) {
+  if (note.startsWith("asr buffer full")) return "一句话太长啦~";
   if (note.startsWith("wifi")) return "我连不上 WiFi 啦…";
   if (note.startsWith("asr rejected")) return "没听清,再说一遍嘛~";
   if (note.startsWith("asr")) return "耳朵(语音识别)出故障了";
@@ -202,6 +246,7 @@ void enterShow(int face, const String& t1, uint16_t c1, const String& t2, uint32
 
 void enterSleep() {
   Serial.println("P: sleep");
+  clearChatHistory();
   state = ST_SLEEP;
   stateStart = millis();
   drawPet(F_SLEEP);
@@ -349,8 +394,12 @@ void loop() {
         enterShow(F_SAD, "你还没说话呢~", TFT_BLACK, "按一下 B 再开口就好", 15000);
         break;
       }
-      if (st == 1) {  // 录完
+      if (st == 1 || st == 3) {  // 录完: 1=正常说完截断, 3=录满3秒强行截断
         recSamples = samples;
+        recBufferFull = (st == 3);
+        if (recBufferFull) {
+          Serial.println("V: buffer full (hit 3s limit)");
+        }
         beep(880, 50);
         state = ST_THINK;
         stateStart = millis();
@@ -366,7 +415,7 @@ void loop() {
       String t, r, note;
       int emo = EMO_HAPPY;
       const uint32_t tProc = millis();
-      const bool ok = petProcessVoice(recSamples, t, r, emo, note);
+      const bool ok = petProcessVoice(recSamples, recBufferFull, t, r, emo, note);
       petPrintTiming(millis() - tProc);
       if (ok) {
         beep(1319, 90);
@@ -375,7 +424,11 @@ void loop() {
                   r.length() ? "小维:" + r : String("(还没配置 DeepSeek Key,我不会说话呀)"), 15000);
       } else {
         beep(196, 250);
-        enterShow(F_SAD, "呜…" + friendlyNote(note), 0x8410, note, 15000);
+        if (note == "asr buffer full") {
+          enterShow(F_CONFUSED, "呜…一句话太长啦~", 0x8410, "单次说话请在3秒内哦", 15000);
+        } else {
+          enterShow(F_SAD, "呜…" + friendlyNote(note), 0x8410, note, 15000);
+        }
       }
       break;
     }

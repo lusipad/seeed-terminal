@@ -16,7 +16,7 @@ void wioLlmDeepSeekBegin(const char* key, const char* systemPrompt) {
   llmSystemPrompt = systemPrompt;
 }
 
-bool wioLlmAsk(const String& question, String& reply, String& note) {
+bool wioLlmAskWithHistory(const WioLlmMsg* history, size_t historyCount, const String& question, String& reply, String& note) {
   reply = "";
   note = "";
   const uint32_t tConn = millis();
@@ -33,6 +33,18 @@ bool wioLlmAsk(const String& question, String& reply, String& note) {
   JsonObject sys = msgs.add<JsonObject>();
   sys["role"] = "system";
   sys["content"] = llmSystemPrompt;
+
+  // 注入历史对话上下文
+  if (history && historyCount > 0) {
+    for (size_t i = 0; i < historyCount; i++) {
+      if (history[i].content.length() > 0) {
+        JsonObject hmsg = msgs.add<JsonObject>();
+        hmsg["role"] = history[i].role;
+        hmsg["content"] = history[i].content;
+      }
+    }
+  }
+
   JsonObject user = msgs.add<JsonObject>();
   user["role"] = "user";
   user["content"] = question;
