@@ -14,17 +14,16 @@
 #include <WioKitNet.h>     // L1 WiFi + HTTP + base64
 #include <WioKitTiming.h>  // 各阶段计时账本("T:" 行)
 
-// ---- 密钥:应用层负责(解耦点③,库永不含密钥)。没有 wifi_secrets.h 也能编译出离线宠物 ----
-#if __has_include("wifi_secrets.h")
-#define PET_HAS_WIFI 1
-#include "wifi_secrets.h"
-#else
-#define PET_HAS_WIFI 0
-#endif
-
-#if PET_HAS_WIFI
+#include <WioKitConfig.h>      // L1 配置持久化 + SoftAP 网页配网
 #include <WioKitAsrBaidu.h>    // L2 百度 ASR
 #include <WioKitLlmDeepSeek.h> // L2 DeepSeek
+
+// ---- 默认密钥/回退:若本地有 wifi_secrets.h 则用作未配网时的缺省值 ----
+#if __has_include("wifi_secrets.h")
+#define HAS_COMPILED_SECRETS 1
+#include "wifi_secrets.h"
+#else
+#define HAS_COMPILED_SECRETS 0
 #endif
 
 #ifndef PET_TEST_OFFLINE
@@ -38,6 +37,11 @@ Seeed_GFX display(Seeed_Product::Wio_Terminal);
 #include "pet_face.h"
 #include "pet_anim.h"
 
+static WioConfig activeConfig;
+static bool hasActiveConfig = false;
+static String petSysPrompt;
+
+const int PIN_KEY_A = WIO_KEY_A;
 const int PIN_KEY_B = WIO_KEY_B;
 const int PIN_KEY_C = WIO_KEY_C;
 const int PIN_JOY_L = WIO_5S_LEFT;
@@ -56,12 +60,26 @@ const uint32_t PET_TRAILING_MS = 1200;  // 说完静音多久自动停(放宽到
 // 语音链路编排(应用层):裁剪 → 识别 → 回答 → 情绪标签
 // ============================================================
 
-#if PET_HAS_WIFI
+const char* getPetSystemPrompt() {
+  petSysPrompt = "你是电子桌宠\"小维\",性格活泼元气,说话简短、口语化、爱用感叹号。"
+                 "回答必须以情绪标签开头,格式如 [开心],情绪只能从 开心/兴奋/惊讶/害羞/疑惑/难过 里选一个;"
+                 "标签后直接是回答正文,用简体中文,45字以内,不要任何其他前缀或解释。";
+  if (hasActiveConfig && strlen(activeConfig.city) > 0) {
+    petSysPrompt += "主人常驻城市是: ";
+    petSysPrompt += activeConfig.city;
+    petSysPrompt += "。被问及天气时据此作答。";
+  }
+  return petSysPrompt.c_str();
+}
 
-const char* const PET_SYSTEM_PROMPT =
-    "你是电子桌宠\"小维\",性格活泼元气,说话简短、口语化、爱用感叹号。"
-    "回答必须以情绪标签开头,格式如 [开心],情绪只能从 开心/兴奋/惊讶/害羞/疑惑/难过 里选一个;"
-    "标签后直接是回答正文,用简体中文,45字以内,不要任何其他前缀或解释。";
+void applyActiveConfig() {
+  if (hasActiveConfig && strlen(activeConfig.ssid) > 0) {
+    wioNetSetYield(petAnimTick);
+    wioNetBegin(activeConfig.ssid, activeConfig.pass);
+    wioAsrBaiduBegin(activeConfig.baiduApiKey, activeConfig.baiduSecret);
+    wioLlmDeepSeekBegin(activeConfig.deepseekKey, getPetSystemPrompt());
+  }
+}
 
 // ---- 多轮对话上下文 (保存最近 2 轮对答 = 4 条消息: user, assistant, user, assistant) ----
 const size_t MAX_HISTORY_MSGS = 4;
@@ -108,6 +126,10 @@ void petPrintTiming(uint32_t processMs) {
 
 // 开机预连:WiFi(只试 1 次,≤15s)+ 百度 token。失败不阻止开机:离线照常做宠物,按 B 时再连
 void petNetWarmup() {
+  if (!hasActiveConfig || strlen(activeConfig.ssid) == 0) {
+    Serial.println("V: no wifi config, skipping warmup");
+    return;
+  }
   const uint32_t t0 = millis();
 #if PET_TEST_OFFLINE
   const bool ok = false;  // 测试:模拟开机时无网
@@ -129,6 +151,11 @@ bool petProcessVoice(uint32_t samples, bool bufferFull, String& transcript, Stri
   emotion = EMO_HAPPY;
   wioTimingReset();
 
+  if (!hasActiveConfig || strlen(activeConfig.ssid) == 0) {
+    note = "wifi not configured";
+    return false;
+  }
+
   // 静音裁剪:去掉首尾低于阈值的段,只留有效语音(+100ms 余量)
   uint32_t lo = 0, hi = samples;
   wioRecTrim(lo, hi);
@@ -145,7 +172,7 @@ bool petProcessVoice(uint32_t samples, bool bufferFull, String& transcript, Stri
     }
     return false;
   }
-  if (strlen(DEEPSEEK_KEY) < 5) {
+  if (!hasActiveConfig || strlen(activeConfig.deepseekKey) < 5) {
     return true;  // 只识别,无回答
   }
 
@@ -170,28 +197,11 @@ bool petProcessVoice(uint32_t samples, bool bufferFull, String& transcript, Stri
   return true;
 }
 
-#else  // !PET_HAS_WIFI:离线宠物,宠物行为照常,B 键按下后走"连不上网"提示
-
-inline void clearChatHistory() {}
-void petPrintTiming(uint32_t processMs) { (void)processMs; }
-void petNetWarmup() {}
-bool petProcessVoice(uint32_t samples, bool bufferFull, String& transcript, String& reply, int& emotion, String& note) {
-  (void)samples;
-  (void)bufferFull;
-  transcript = "";
-  reply = "";
-  emotion = EMO_HAPPY;
-  note = "wifi failed";
-  return false;
-}
-
-#endif  // PET_HAS_WIFI
-
 // ============================================================
 // 状态机
 // ============================================================
 
-enum PetState { ST_IDLE, ST_RECORD, ST_THINK, ST_SHOW, ST_SLEEP };
+enum PetState { ST_IDLE, ST_RECORD, ST_THINK, ST_SHOW, ST_SLEEP, ST_CONFIG };
 PetState state = ST_IDLE;
 unsigned long stateStart = 0;
 unsigned long showUntil = 0;
@@ -223,7 +233,18 @@ String friendlyNote(const String& note) {
 }
 
 void drawIdleHint() {
-  drawTextCJK("按一下 B 说话,说完我自己停", 62, 218, 320, TFT_LIGHTGREY, C_BOTTOM_BG);
+  drawTextCJK("按 B 说话, 按 A 配网", 64, 218, 320, TFT_LIGHTGREY, C_BOTTOM_BG);
+}
+
+void enterConfig() {
+  state = ST_CONFIG;
+  stateStart = millis();
+  beep(1200, 80);
+  drawPet(F_LISTEN);
+  drawBubbleText("手机连接热点: Wio-Pet", TFT_BLACK, "打开网页 192.168.4.1", TFT_BLACK);
+  drawTextCJK("手机完成配置 | 按 B 退出", 64, 218, 320, TFT_LIGHTGREY, C_BOTTOM_BG);
+  petAnimSet(A_LISTEN);
+  wioPortalBegin("Wio-Pet", activeConfig);
 }
 
 void enterIdle() {
@@ -318,17 +339,32 @@ void setup() {
   wioMicBegin();
   wioMicConfig(400, PET_TRAILING_MS, 8000);  // 静音阈值 / 截断静音时长 / 没说话超时
   wioSenseBegin();
-#if PET_HAS_WIFI
-  wioNetSetYield(petAnimTick);  // 解耦点②:网络等待期间动画照常
-  wioNetBegin(WIFI_SSID, WIFI_PASS);  // 解耦点③:密钥由应用注入,库永不含密钥
-  wioAsrBaiduBegin(BAIDU_API_KEY, BAIDU_SECRET_KEY);
-  wioLlmDeepSeekBegin(DEEPSEEK_KEY, PET_SYSTEM_PROMPT);
+  wioConfigInit();
+  hasActiveConfig = wioConfigLoad(activeConfig);
+  if (!hasActiveConfig) {
+#if HAS_COMPILED_SECRETS
+    memset(&activeConfig, 0, sizeof(activeConfig));
+    strncpy(activeConfig.ssid, WIFI_SSID, sizeof(activeConfig.ssid) - 1);
+    strncpy(activeConfig.pass, WIFI_PASS, sizeof(activeConfig.pass) - 1);
+    strncpy(activeConfig.baiduApiKey, BAIDU_API_KEY, sizeof(activeConfig.baiduApiKey) - 1);
+    strncpy(activeConfig.baiduSecret, BAIDU_SECRET_KEY, sizeof(activeConfig.baiduSecret) - 1);
+    strncpy(activeConfig.deepseekKey, DEEPSEEK_KEY, sizeof(activeConfig.deepseekKey) - 1);
+    strncpy(activeConfig.city, "深圳", sizeof(activeConfig.city) - 1);
+    hasActiveConfig = true;
+    Serial.println("V: using default compiled secrets");
 #endif
-  Serial.println("HELLO pet 1.2");
+  }
+  applyActiveConfig();
+  Serial.println("HELLO pet 1.3");
   drawPet(F_SLEEP);
-  drawTextCJK("小维醒来中…正在连网", 84, 218, 320, TFT_LIGHTGREY, C_BOTTOM_BG);
-  petAnimSet(A_WAKE);
-  petNetWarmup();
+  if (hasActiveConfig && strlen(activeConfig.ssid) > 0) {
+    drawTextCJK("小维醒来中…正在连网", 84, 218, 320, TFT_LIGHTGREY, C_BOTTOM_BG);
+    petAnimSet(A_WAKE);
+    petNetWarmup();
+  } else {
+    drawTextCJK("初次见面! 按 A 键配网", 80, 218, 320, TFT_LIGHTGREY, C_BOTTOM_BG);
+    petAnimSet(A_WAKE);
+  }
 #if PET_TEST_BAD_TOKEN
   wioAsrBaiduDebugToken("invalid_token_for_selftest_0000");
 #endif
@@ -362,6 +398,11 @@ void loop() {
         break;
       }
       if (idleFor > PET_DROWSY_MS && petAnimCurrent() == A_IDLE) petAnimSet(A_DROWSY);
+      if (pressed(PIN_KEY_A)) {  // A 键:进入端侧热点网页配网
+        lastInteract = millis();
+        enterConfig();
+        break;
+      }
       if (pressed(PIN_KEY_C)) {  // C 键:叫醒犯困的小维
         lastInteract = millis();
         petAnimSet(A_IDLE);
@@ -446,6 +487,32 @@ void loop() {
       if (anyKeyDown()) {
         wakeUp();
         while (anyKeyDown()) petAnimTick();  // 等松手,避免叫醒的那一下又触发录音
+      }
+      break;
+    }
+
+    case ST_CONFIG: {
+      WioConfig newCfg;
+      const int st = wioPortalPoll(newCfg);
+      if (st == 1) {  // 手机配网已保存
+        beep(1568, 150);
+        activeConfig = newCfg;
+        hasActiveConfig = true;
+        wioPortalEnd();
+        drawPet(F_HAPPY);
+        drawBubbleText("配置保存成功！", TFT_BLACK, "正在重新连网中…", TFT_BLACK);
+        petAnimSet(A_EMOTE, F_HAPPY);
+        delay(1200);
+        applyActiveConfig();
+        petNetWarmup();
+        enterIdle();
+        break;
+      }
+      if (pressed(PIN_KEY_B)) {  // B 键退出配网
+        beep(880, 80);
+        wioPortalEnd();
+        enterIdle();
+        break;
       }
       break;
     }
