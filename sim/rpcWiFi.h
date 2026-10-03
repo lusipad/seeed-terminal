@@ -1,0 +1,21 @@
+// rpcWiFi 替身:WiFi 恒为已连接(模拟器不模拟网络,云端由 sim/mocks.cpp 扮演)
+#pragma once
+#include "Arduino.h"
+
+#define WL_CONNECTED 3
+#define WL_IDLE_STATUS 0
+
+class IPAddress {
+ public:
+  const char* c_str() const { return "192.168.7.7 (sim)"; }
+};
+
+class SimWiFiClass {
+ public:
+  int status() const { return WL_CONNECTED; }
+  void begin(const char*, const char*) {}
+  void disconnect() {}
+  IPAddress localIP() const { return IPAddress(); }
+};
+
+extern SimWiFiClass WiFi;

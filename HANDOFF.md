@@ -78,6 +78,9 @@ libraries/WioKit/            标准 Arduino 库(library.properties + src/ + exam
   src/WioKitTiming.h         计时账本(wioTiming(),"T:" 行数据源)
 pet/                         应用层只剩:状态机、pet_face/pet_anim(表情动画)、
                              系统提示词、密钥(__has_include 门控)、语音编排 petProcessVoice()
+sim/                         宿主模拟器(Windows/MSVC):真实 pet.ino/pet_face/pet_anim/WioKitCjk
+                             编译成 PC 程序,屏幕出 PNG、按键脚本注入、云端走仿真桩。
+                             bash sim/build.sh 跑场景 + L0 自检;README 首图即出自这里
 console/                     不迁,拷贝保留原状
 tests/pet_selftest/          L0 板上自检(直接 include 库头,不再有同步拷贝)
 tools/gen_font.py            字体生成器 → 直接吐到 libraries/WioKit/src/WioKitFontHz16.h
