@@ -137,13 +137,24 @@ class Seeed_GFX {
   }
 
   void fillRoundRect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, uint32_t c) {
+    if (r <= 0) { fillRect(x, y, w, h, c); return; }
+    if (2 * r > w) r = w / 2;
+    if (2 * r > h) r = h / 2;
     fillRect(x + r, y, w - 2 * r, h, c);
-    fillCorner(x + r, y + r, r, c, -1);              // 左上
-    fillCorner(x + w - r - 1, y + r, r, c, +1);      // 右上
-    fillCorner(x + r, y + h - r - 1, r, c, -1);      // 左下
-    fillCorner(x + w - r - 1, y + h - r - 1, r, c, +1);  // 右下
+    fillRect(x, y + r, r, h - 2 * r, c);
+    fillRect(x + w - r, y + r, r, h - 2 * r, c);
+    for (int32_t dy = 1; dy <= r; dy++) {
+      const int32_t dx = (int32_t)(std::sqrt((double)(r * r - dy * dy)) + 0.5);
+      drawFastHLine(x + r - dx, y + r - dy, dx, c);
+      drawFastHLine(x + w - r, y + r - dy, dx, c);
+      drawFastHLine(x + r - dx, y + h - r + dy - 1, dx, c);
+      drawFastHLine(x + w - r, y + h - r + dy - 1, dx, c);
+    }
   }
   void drawRoundRect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, uint32_t c) {
+    if (r <= 0) { drawRect(x, y, w, h, c); return; }
+    if (2 * r > w) r = w / 2;
+    if (2 * r > h) r = h / 2;
     drawFastHLine(x + r, y, w - 2 * r, c);
     drawFastHLine(x + r, y + h - 1, w - 2 * r, c);
     drawFastVLine(x, y + r, h - 2 * r, c);

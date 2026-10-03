@@ -179,7 +179,7 @@ String friendlyNote(const String& note) {
 }
 
 void drawIdleHint() {
-  drawTextCJK("按一下 B 说话,说完我自己停", 62, 220, 320, TFT_DARKGREY);
+  drawTextCJK("按一下 B 说话,说完我自己停", 62, 218, 320, TFT_LIGHTGREY, C_BOTTOM_BG);
 }
 
 void enterIdle() {
@@ -281,7 +281,7 @@ void setup() {
 #endif
   Serial.println("HELLO pet 1.2");
   drawPet(F_SLEEP);
-  drawTextCJK("小维醒来中…正在连网", 84, 220, 320, TFT_DARKGREY);
+  drawTextCJK("小维醒来中…正在连网", 84, 218, 320, TFT_LIGHTGREY, C_BOTTOM_BG);
   petAnimSet(A_WAKE);
   petNetWarmup();
 #if PET_TEST_BAD_TOKEN
