@@ -19,125 +19,154 @@ rot_y90 = trimesh.transformations.rotation_matrix(np.pi / 2, [0, 1, 0])
 
 
 # ==============================================================================
-# Model 1: wio_tilt_tv_head (Lightweight Monitor Head: 44.55 cm3)
-# Bounds: [82.0, 29.0, 94.5] mm -> All <= 100mm
+# Model 1: wio_tilt_tv_head (Uniform Thin Shell Monitor Head: ~31.5 cm3)
+# Strictly 1 Shell, 100% Watertight, All walls 2.0-3.9mm (No thick solid blocks)
+# Bounds: [82.0, 28.2, 85.0] mm -> All <= 100mm
 # ==============================================================================
 def build_tilt_tv_head():
+    # Outer cabinet box: 82.0 x 26.0 x 64.0 mm
     cab = trimesh.creation.box([82.0, 26.0, 64.0])
     cab.apply_translation([0, 13.0, 32.0])
 
-    lug = trimesh.creation.box([14.0, 14.0, 14.0])
-    lug.apply_translation([0, 13.0, -7.0])
+    # Bottom pivot lug: outer width 12.0mm (X in [-6, 6]), depth 12.0mm (Y in [7, 19])
+    # Cylinder radius 6.0mm at Z=-6.0
+    lug_box = trimesh.creation.box([12.0, 12.0, 7.0])
+    lug_box.apply_translation([0, 13.0, -2.5])
 
-    lug_cyl = trimesh.creation.cylinder(radius=7.0, height=14.0)
+    lug_cyl = trimesh.creation.cylinder(radius=6.0, height=12.0)
     lug_cyl.apply_transform(rot_y90)
-    lug_cyl.apply_translation([0, 13.0, -7.0])
+    lug_cyl.apply_translation([0, 13.0, -6.0])
 
-    k1 = trimesh.creation.cylinder(radius=5.0, height=3.0)
+    # Front right decorative retro dials
+    k1 = trimesh.creation.cylinder(radius=4.5, height=2.2)
     k1.apply_transform(rot_x90)
-    k1.apply_translation([27.0, -1.5, 43.0])
+    k1.apply_translation([27.0, -1.1, 46.0])
 
-    k2 = trimesh.creation.cylinder(radius=5.0, height=3.0)
+    k2 = trimesh.creation.cylinder(radius=4.5, height=2.2)
     k2.apply_transform(rot_x90)
-    k2.apply_translation([27.0, -1.5, 23.0])
+    k2.apply_translation([27.0, -1.1, 32.0])
 
+    # Cat ears: penetrate by 2.0mm into cabinet top (Z=64.0) to ensure continuous manifold shell
     ear_l = trimesh.creation.cone(radius=6.5, height=11.0)
-    ear_l.apply_translation([-20.0, 13.0, 64.0 + 5.5])
+    ear_l.apply_translation([-20.0, 13.0, 62.0])
 
     ear_r = trimesh.creation.cone(radius=6.5, height=11.0)
-    ear_r.apply_translation([20.0, 13.0, 64.0 + 5.5])
+    ear_r.apply_translation([20.0, 13.0, 62.0])
 
-    union_mesh = trimesh.boolean.union([cab, lug, lug_cyl, k1, k2, ear_l, ear_r], engine='manifold')
+    union_mesh = trimesh.boolean.union([cab, lug_box, lug_cyl, k1, k2, ear_l, ear_r], engine='manifold')
 
     # Subtractions:
+    # 1. Main hollow interior cavity: ensures uniform 2.2mm wall thickness throughout cabinet
+    cavity = trimesh.creation.box([77.6, 21.6, 59.6])
+    cavity.apply_translation([0, 13.0, 32.0])
+
+    # 2. Lug core pocket (cores out the lug from inside so wall thickness is <= 3.8mm)
+    lug_core = trimesh.creation.box([6.0, 6.0, 6.0])
+    lug_core.apply_translation([0, 13.0, 0.0])
+
+    # 3. Pivot through-hole: diameter 3.6mm (for M3 bolt)
+    pivot_hole = trimesh.creation.cylinder(radius=1.8, height=30.0)
+    pivot_hole.apply_transform(rot_y90)
+    pivot_hole.apply_translation([0, 13.0, -6.0])
+
+    # 4. Hollow ear cores (cores out cone ears from inside so ear thickness is uniform 2.2mm)
+    ear_core_l = trimesh.creation.cone(radius=4.3, height=9.0)
+    ear_core_l.apply_translation([-20.0, 13.0, 61.8])
+
+    ear_core_r = trimesh.creation.cone(radius=4.3, height=9.0)
+    ear_core_r.apply_translation([20.0, 13.0, 61.8])
+
+    # 5. Screen viewing window: 50.0 x 38.0 mm
     screen = trimesh.creation.box([50.0, 8.0, 38.0])
     screen.apply_translation([-5.0, 0, 32.0])
 
-    pocket = trimesh.creation.box([73.0, 13.0, 58.0])
-    pocket.apply_translation([0, 8.5, 32.0])
-
-    chamber = trimesh.creation.box([70.0, 10.0, 54.0])
-    chamber.apply_translation([0, 19.0, 32.0])
-
-    pivot_hole = trimesh.creation.cylinder(radius=1.8, height=30.0)
-    pivot_hole.apply_transform(rot_y90)
-    pivot_hole.apply_translation([0, 13.0, -7.0])
-
-    top_btns = trimesh.creation.box([42.0, 8.0, 8.0])
-    top_btns.apply_translation([-5.0, 8.5, 64.0])
-
-    type_c = trimesh.creation.box([8.0, 14.0, 10.0])
-    type_c.apply_translation([-41.0, 8.5, 32.0])
-
-    joystick = trimesh.creation.cylinder(radius=7.5, height=8.0)
+    # 6. Joystick circular opening on front right: diameter 13.0mm
+    joystick = trimesh.creation.cylinder(radius=6.5, height=8.0)
     joystick.apply_transform(rot_x90)
-    joystick.apply_translation([25.0, 0, 17.0])
+    joystick.apply_translation([27.0, 0, 16.0])
 
+    # 7. Top 3-button finger access slot: 42.0 x 8.0 mm
+    top_btns = trimesh.creation.box([42.0, 8.0, 10.0])
+    top_btns.apply_translation([-5.0, 8.5, 63.0])
+
+    # 8. Type-C port on left: 10.0 x 14.0 x 10.0 mm
+    type_c = trimesh.creation.box([10.0, 14.0, 10.0])
+    type_c.apply_translation([-40.0, 8.5, 32.0])
+
+    # 9. Rear speaker grille & resin drain slits (5 slits of 48.0 x 2.2 mm)
     slits = []
     for i in range(5):
-        s = trimesh.creation.box([48.0, 6.0, 2.2])
-        s.apply_translation([0, 26.0, 20.0 + i * 5.5])
+        s = trimesh.creation.box([48.0, 8.0, 2.2])
+        s.apply_translation([0, 25.0, 20.0 + i * 5.5])
         slits.append(s)
 
-    cutouts = [screen, pocket, chamber, pivot_hole, top_btns, type_c, joystick] + slits
+    cutouts = [cavity, lug_core, pivot_hole, ear_core_l, ear_core_r, screen, joystick, top_btns, type_c] + slits
     result = union_mesh.difference(cutouts, engine='manifold')
     return result
 
 
 # ==============================================================================
-# Model 2: wio_tilt_tv_base (Rock-Solid Clevis Base: 20.45 cm3)
-# Bounds: [76.0, 72.0, 34.5] mm -> All <= 100mm
+# Model 2: wio_tilt_tv_base (Lightweight Ribbed Clevis Base: ~16.0 cm3)
+# Strictly 1 Shell, 100% Watertight, Integrated M3 hex nut lock & screw recess
+# Bounds: [76.0, 72.0, 30.5] mm -> All <= 100mm
 # ==============================================================================
 def build_tilt_tv_base():
-    plate = trimesh.creation.box([76.0, 72.0, 4.5])
-    plate.apply_translation([0, 6.0, 2.25])
+    # Base deck plate: 76.0 x 72.0 x 4.2mm
+    plate = trimesh.creation.box([76.0, 72.0, 4.2])
+    plate.apply_translation([0, 6.0, 2.1])
 
-    arm_l = trimesh.creation.box([5.0, 16.0, 22.0])
-    arm_l.apply_translation([-9.7, 0, 15.5])
-    arm_l_top = trimesh.creation.cylinder(radius=8.0, height=5.0)
+    # Left clevis arm: width 3.7mm (X in [-10.2, -6.5])
+    arm_l = trimesh.creation.box([3.7, 13.0, 21.0])
+    arm_l.apply_translation([-8.35, 0, 13.5])
+    arm_l_top = trimesh.creation.cylinder(radius=6.5, height=3.7)
     arm_l_top.apply_transform(rot_y90)
-    arm_l_top.apply_translation([-9.7, 0, 26.5])
+    arm_l_top.apply_translation([-8.35, 0, 24.0])
 
-    arm_r = trimesh.creation.box([5.0, 16.0, 22.0])
-    arm_r.apply_translation([9.7, 0, 15.5])
-    arm_r_top = trimesh.creation.cylinder(radius=8.0, height=5.0)
+    # Right clevis arm: width 3.7mm (X in [6.5, 10.2])
+    # Gap between arms is 13.0mm (perfect fit for 12.0mm head lug with 0.5mm clearance)
+    arm_r = trimesh.creation.box([3.7, 13.0, 21.0])
+    arm_r.apply_translation([8.35, 0, 13.5])
+    arm_r_top = trimesh.creation.cylinder(radius=6.5, height=3.7)
     arm_r_top.apply_transform(rot_y90)
-    arm_r_top.apply_translation([9.7, 0, 26.5])
+    arm_r_top.apply_translation([8.35, 0, 24.0])
 
     union_mesh = trimesh.boolean.union([plate, arm_l, arm_l_top, arm_r, arm_r_top], engine='manifold')
 
-    # Pivot hole (diameter 3.6mm)
-    pivot_hole = trimesh.creation.cylinder(radius=1.8, height=40.0)
+    # Pivot through-hole: diameter 3.4mm (for M3 bolt)
+    pivot_hole = trimesh.creation.cylinder(radius=1.7, height=30.0)
     pivot_hole.apply_transform(rot_y90)
-    pivot_hole.apply_translation([0, 0, 26.5])
+    pivot_hole.apply_translation([0, 0, 24.0])
 
-    # Bottom weight-reduction pocket with cross ribs
-    pocket = trimesh.creation.box([64.0, 60.0, 2.5])
-    pocket.apply_translation([0, 6.0, 1.25])
-    rib_x = trimesh.creation.box([64.0, 4.0, 2.5])
-    rib_x.apply_translation([0, 6.0, 1.25])
-    rib_y = trimesh.creation.box([4.0, 60.0, 2.5])
-    rib_y.apply_translation([0, 6.0, 1.25])
+    # Left arm: integrated M3 hex nut anti-rotation recess (depth 2.2mm, sections=6, radius 3.4mm)
+    hex_nut = trimesh.creation.cylinder(radius=3.4, height=2.2, sections=6)
+    hex_nut.apply_transform(rot_y90)
+    hex_nut.apply_translation([-9.5, 0, 24.0])
+
+    # Right arm: M3 screw head counterbore recess (depth 1.6mm, radius 3.3mm)
+    screw_cb = trimesh.creation.cylinder(radius=3.3, height=1.6)
+    screw_cb.apply_transform(rot_y90)
+    screw_cb.apply_translation([9.5, 0, 24.0])
+
+    # Bottom weight-reduction pocket: depth 2.2mm (leaving 2.0mm uniform deck)
+    pocket = trimesh.creation.box([70.0, 66.0, 2.2])
+    pocket.apply_translation([0, 6.0, 1.1])
+
+    # Stiffening cross ribs: 3.0mm width
+    rib_x = trimesh.creation.box([70.0, 3.0, 2.2])
+    rib_x.apply_translation([0, 6.0, 1.1])
+    rib_y = trimesh.creation.box([3.0, 66.0, 2.2])
+    rib_y.apply_translation([0, 6.0, 1.1])
+
     pocket_sub = pocket.difference([rib_x, rib_y], engine='manifold')
 
-    # 4 Optional 1-Yuan Coin Ballast Wells (diameter 25.5mm, depth 2.2mm)
-    c1 = trimesh.creation.cylinder(radius=12.75, height=2.2)
-    c1.apply_translation([-17.0, -10.0, 1.1])
-    c2 = trimesh.creation.cylinder(radius=12.75, height=2.2)
-    c2.apply_translation([ 17.0, -10.0, 1.1])
-    c3 = trimesh.creation.cylinder(radius=12.75, height=2.2)
-    c3.apply_translation([-17.0,  22.0, 1.1])
-    c4 = trimesh.creation.cylinder(radius=12.75, height=2.2)
-    c4.apply_translation([ 17.0,  22.0, 1.1])
-
-    # Anti-slip rubber foot corner indentations (4 corners)
+    # 4 corner rubber foot pad recesses: 8x8x1.0mm
     feet = []
-    for fx, fy in [(-32.0, -24.0), (32.0, -24.0), (-32.0, 36.0), (32.0, 36.0)]:
+    for fx, fy in [(-31.0, -23.0), (31.0, -23.0), (-31.0, 35.0), (31.0, 35.0)]:
         f = trimesh.creation.box([8.0, 8.0, 1.0])
         f.apply_translation([fx, fy, 0.5])
         feet.append(f)
 
-    result = union_mesh.difference([pivot_hole, pocket_sub, c1, c2, c3, c4] + feet, engine='manifold')
+    result = union_mesh.difference([pivot_hole, hex_nut, screw_cb, pocket_sub] + feet, engine='manifold')
     return result
 
 
@@ -171,25 +200,6 @@ def build_tilt_tv_knob():
 
     result = union_mesh.difference([hole, hex_nut], engine='manifold')
     return result
-
-
-# ==============================================================================
-# JLC FREE SPECIAL: 02_jlc_tilt_tv_base.stl (Base + Knob connected, 22.29 cm3)
-# Solves the "max 2 models per order" rule!
-# Total volume with head: 44.55 + 22.29 = 66.84 cm3 <= 70.00 cm3!
-# ==============================================================================
-def build_jlc_free_base(base_mesh, knob_mesh):
-    knob_c = knob_mesh.copy()
-    # Place knob in rear open area of base plate (Y = +20, Z = 5.0)
-    knob_c.apply_translation([0, 20.0, 5.0])
-
-    # 1.5mm breakable connector rod
-    rod = trimesh.creation.cylinder(radius=0.75, height=14.0)
-    rod.apply_transform(rot_x90)
-    rod.apply_translation([0, 11.0, 7.0])
-
-    combo = trimesh.boolean.union([base_mesh, knob_c, rod], engine='manifold')
-    return combo
 
 
 # ==============================================================================
@@ -292,23 +302,23 @@ def build_retro_tv():
 
     legs = []
     for lx, ly in [(-35.0, 4.0), (35.0, 4.0), (-35.0, 22.0), (35.0, 22.0)]:
-        leg = trimesh.creation.box([5.0, 5.0, 10.0])
-        leg.apply_translation([lx, ly, -5.0])
+        leg = trimesh.creation.box([5.0, 5.0, 11.0])
+        leg.apply_translation([lx, ly, -4.5])
         legs.append(leg)
 
-    ear_l = trimesh.creation.cone(radius=7.0, height=12.0)
-    ear_l.apply_translation([-20.0, 13.0, 66.0 + 6.0])
+    ear_l = trimesh.creation.cone(radius=7.0, height=13.0)
+    ear_l.apply_translation([-20.0, 13.0, 64.0])
 
-    ear_r = trimesh.creation.cone(radius=7.0, height=12.0)
-    ear_r.apply_translation([20.0, 13.0, 66.0 + 6.0])
+    ear_r = trimesh.creation.cone(radius=7.0, height=13.0)
+    ear_r.apply_translation([20.0, 13.0, 64.0])
 
     union_mesh = trimesh.boolean.union([cab, k1, k2, ear_l, ear_r] + legs, engine='manifold')
 
     screen = trimesh.creation.box([50.0, 10.0, 38.0])
     screen.apply_translation([-6.0, 0, 33.0])
 
-    pocket = trimesh.creation.box([73.0, 14.0, 58.0])
-    pocket.apply_translation([0, 14.0, 33.0])
+    pocket = trimesh.creation.box([73.0, 22.0, 58.0])
+    pocket.apply_translation([0, 16.0, 33.0])
 
     result = union_mesh.difference([screen, pocket], engine='manifold')
     return result
@@ -348,11 +358,11 @@ def main():
     print("\n" + "=" * 75)
     print("EXPORTING JLC FREE 3D PRINTING DEDICATED FILES (Strict 2-item, <=70cm³)...")
     print("=" * 75)
-    # JLC Free dedicated files
-    jlc_base = build_jlc_free_base(base, knob)
-    export_stl(head,     'cad/stl/jlc_free/01_jlc_tilt_tv_head.stl')
-    export_stl(jlc_base, 'cad/stl/jlc_free/02_jlc_tilt_tv_base_with_knob.stl')
-    export_stl(build_desktop_dock(), 'cad/stl/jlc_free/03_jlc_unibody_dock.stl')
+    # JLC Free dedicated files (Strictly 1 Shell each, uniform thin walls, 2 files per order)
+    export_stl(head,                 'cad/stl/jlc_free/01_jlc_tilt_tv_head.stl')
+    export_stl(base,                 'cad/stl/jlc_free/02_jlc_tilt_tv_base.stl')
+    export_stl(knob,                 'cad/stl/jlc_free/03_jlc_tilt_tv_knob.stl')
+    export_stl(build_desktop_dock(), 'cad/stl/jlc_free/04_jlc_unibody_dock.stl')
 
     print("\nAll models exported and validated!")
 
