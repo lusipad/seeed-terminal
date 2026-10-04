@@ -1,397 +1,329 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 780" width="100%" height="100%" style="background:#0c1017; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;">
-  <defs>
-    <!-- Gradients -->
-    <linearGradient id="bgGlow" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#131b26"/>
-      <stop offset="100%" stop-color="#090d14"/>
-    </linearGradient>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 920" width="100%" height="100%" style="background:#090d16; font-family:Consolas, Monaco, "Segoe UI", "PingFang SC", monospace;">
+<defs>
+      <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 2 L 10 5 L 0 8 z" fill="#38bdf8"/>
+      </marker>
+      <marker id="arrowRev" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+        <path d="M 10 2 L 0 5 L 10 8 z" fill="#38bdf8"/>
+      </marker>
+      <pattern id="cadGrid" width="25" height="25" patternUnits="userSpaceOnUse">
+        <path d="M 25 0 L 0 0 0 25" stroke="#141d2b" stroke-width="0.8"/>
+      </pattern>
+      <pattern id="cadGridSub" width="125" height="125" patternUnits="userSpaceOnUse">
+        <path d="M 125 0 L 0 0 0 125" stroke="#1e2c40" stroke-width="1.2"/>
+      </pattern>
+    </defs>
+<rect width="1280" height="920" fill="url(#cadGrid)"/>
+<rect width="1280" height="920" fill="url(#cadGridSub)"/>
+<rect x="24" y="24" width="1232" height="872" fill="none" stroke="#334155" stroke-width="2"/>
+<rect x="28" y="28" width="1224" height="864" fill="none" stroke="#1e293b" stroke-width="1"/>
 
-    <!-- TV Head Plastic Gradient (Ivory White 9600 Resin) -->
-    <linearGradient id="tvPlastic" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#ffffff"/>
-      <stop offset="50%" stop-color="#f5f2ea"/>
-      <stop offset="100%" stop-color="#e3ded2"/>
-    </linearGradient>
-
-    <linearGradient id="tvPlasticShadow" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#e3ded2"/>
-      <stop offset="100%" stop-color="#cdc5b5"/>
-    </linearGradient>
-
-    <!-- CRT Screen Bezel Inset Gradient -->
-    <linearGradient id="crtBezel" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#2c2823"/>
-      <stop offset="50%" stop-color="#1f1c18"/>
-      <stop offset="100%" stop-color="#14120f"/>
-    </linearGradient>
-
-    <!-- Screen Glass Glow Gradient -->
-    <linearGradient id="screenGlass" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#1e293b"/>
-      <stop offset="100%" stop-color="#0f172a"/>
-    </linearGradient>
-
-    <!-- Vintage Brass Knob Gradient -->
-    <linearGradient id="brassGold" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#fde047"/>
-      <stop offset="40%" stop-color="#eab308"/>
-      <stop offset="100%" stop-color="#ca8a04"/>
-    </linearGradient>
-
-    <linearGradient id="brassGoldDark" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#ca8a04"/>
-      <stop offset="100%" stop-color="#854d0e"/>
-    </linearGradient>
-
-    <!-- Base Charcoal Matte Resin -->
-    <linearGradient id="basePlastic" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#334155"/>
-      <stop offset="50%" stop-color="#1e293b"/>
-      <stop offset="100%" stop-color="#0f172a"/>
-    </linearGradient>
-
-    <!-- Motion Glow -->
-    <linearGradient id="cyanGlow" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#38bdf8"/>
-      <stop offset="100%" stop-color="#0284c7"/>
-    </linearGradient>
-
-    <!-- Filters -->
-    <filter id="dropShadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="16" stdDeviation="20" flood-color="#000000" flood-opacity="0.6"/>
-    </filter>
-    <filter id="softGlow" x="-20%" y="-20%" width="140%" height="140%">
-      <feGaussianBlur stdDeviation="6" result="blur"/>
-      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
-    </filter>
-  </defs>
-
-  <!-- Background Blueprint Canvas -->
-  <rect width="1100" height="780" fill="url(#bgGlow)"/>
-
-  <!-- Tech Grid Background -->
-  <g opacity="0.07" stroke="#38bdf8" stroke-width="0.8">
-    <pattern id="grid" width="30" height="30" patternUnits="userSpaceOnUse">
-      <path d="M 30 0 L 0 0 0 30"/>
-    </pattern>
-    <rect width="1100" height="780" fill="url(#grid)"/>
-  </g>
-
-  <!-- ========================================================================= -->
-  <!-- HEADER & BADGES                                                          -->
-  <!-- ========================================================================= -->
-  <g transform="translate(60, 48)">
-    <rect x="0" y="0" width="136" height="24" rx="12" fill="#38bdf8" fill-opacity="0.15" stroke="#38bdf8" stroke-width="1"/>
-    <text x="68" y="16" fill="#38bdf8" font-size="11" font-weight="bold" text-anchor="middle" letter-spacing="1">3D CAD DESIGN</text>
-    <text x="0" y="58" fill="#ffffff" font-size="28" font-weight="800" letter-spacing="-0.5">Wio Terminal 可俯仰复古小电视监视器</text>
-    <text x="0" y="84" fill="#94a3b8" font-size="14">自由 0° ~ 45° 俯仰调节 • 9600 高韧光敏树脂 • 内嵌共鸣音腔与电池仓 • 免焊接一体机</text>
-  </g>
-
-  <!-- ========================================================================= -->
-  <!-- MAIN LEFT PANEL: 3D PERSPECTIVE ASSEMBLED HERO VIEW (MAIN PRODUCT)        -->
-  <!-- ========================================================================= -->
-  <g transform="translate(240, 410)" filter="url(#dropShadow)">
-
-    <!-- Desk Surface Shadow -->
-    <ellipse cx="0" cy="180" rx="210" ry="32" fill="#000000" opacity="0.5" filter="url(#softGlow)"/>
-
-    <!-- ==================== DESK BASE (CHARCOAL RESIN) ==================== -->
-    <!-- Base Bottom Plate -->
-    <path d="M -150 140 L 150 140 L 130 170 L -130 170 Z" fill="#0f172a" stroke="#334155" stroke-width="1.5"/>
-    <path d="M -150 132 L 150 132 L 150 140 L -150 140 Z" fill="#1e293b"/>
-    <!-- Base Top Chamfer Slab -->
-    <path d="M -135 120 L 135 120 L 146 132 L -146 132 Z" fill="#334155" stroke="#475569" stroke-width="1.2"/>
-    <path d="M -135 120 L 135 120 L 125 108 L -125 108 Z" fill="url(#basePlastic)"/>
-
-    <!-- Dual Upright Support Arms (Clevis) -->
-    <!-- Left Arm -->
-    <path d="M -32 110 L -18 110 L -18 40 L -32 40 Z" fill="#1e293b"/>
-    <circle cx="-25" cy="40" r="14" fill="#334155" stroke="#475569" stroke-width="1.5"/>
-    <!-- Right Arm -->
-    <path d="M 18 110 L 32 110 L 32 40 L 18 40 Z" fill="#1e293b"/>
-    <circle cx="25" cy="40" r="14" fill="#334155" stroke="#475569" stroke-width="1.5"/>
-
-    <!-- Steel Pivot Center Pin -->
-    <circle cx="-25" cy="40" r="4.5" fill="#64748b"/>
-    <circle cx="25" cy="40" r="4.5" fill="#64748b"/>
-
-    <!-- ==================== BRASS THUMB ADJUSTMENT KNOB ==================== -->
-    <g transform="translate(38, 40)">
-      <!-- Knurled Teeth Outer Rim -->
-      <path d="M 0 -18 L 8 -18 L 10 -14 L 14 -14 L 14 -10 L 18 -8 L 18 0 L 18 8 L 14 10 L 14 14 L 10 14 L 8 18 L 0 18 L -8 18 L -10 14 L -14 14 L -14 10 L -18 8 L -18 0 L -18 -8 L -14 -10 L -14 -14 L -10 -14 L -8 -18 Z" fill="url(#brassGoldDark)" stroke="#ca8a04" stroke-width="1"/>
-      <circle cx="0" cy="0" r="13" fill="url(#brassGold)"/>
-      <circle cx="0" cy="0" r="7" fill="url(#brassGoldDark)"/>
-      <circle cx="0" cy="0" r="3.5" fill="#451a03"/>
-      <!-- Indicator Tick -->
-      <line x1="0" y1="-12" x2="0" y2="-6" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/>
+    <g transform="translate(48, 56)">
+      <text x="0" y="0" fill="#f8fafc" font-size="20" font-weight="bold" letter-spacing="0.5">WIO TERMINAL 可俯仰复古小电视监视器 — 标准工程制图三视图</text>
+      <text x="0" y="22" fill="#94a3b8" font-size="12">DWG NO: WT-TILT-TV-001  |  SCALE 2.5:1 (1mm = 2.5px)  |  UNIT: MM  |  MODEL: 9600 HIGH-TOUGHNESS RESIN</text>
+      <text x="0" y="38" fill="#38bdf8" font-size="11">✓ 严格按真实 STL 网格尺寸 1:1 投影绘制（所有标注与 cad/stl/*.stl 几何完全一致）</text>
     </g>
+    
 
-    <!-- ==================== ROTATING MONITOR HEAD (AT 25° TILT) ==================== -->
-    <g transform="rotate(-15, 0, 40)">
+    <!-- ==================== VIEW 1: FRONT ELEVATION ==================== -->
+    <g id="view_front">
+      <!-- View Title -->
+      <text x="250" y="125" fill="#f8fafc" font-size="15" font-weight="bold" text-anchor="middle">主视图 / 正立面 (FRONT ELEVATION)</text>
+      <text x="250" y="142" fill="#64748b" font-size="11" text-anchor="middle">视角：从正面直视（未俯仰，机头垂直状态）</text>
 
-      <!-- Bottom Hinge Lug (between clevis arms) -->
-      <path d="M -16 35 L 16 35 L 16 5 M -16 5 Z" fill="#d1c9bb" stroke="#b8ad9c" stroke-width="1.2"/>
-      <rect x="-16" y="5" width="32" height="30" rx="4" fill="url(#tvPlasticShadow)"/>
-      <circle cx="0" cy="40" r="7" fill="#94a3b8"/>
+      <!-- Centerline (Vertical) -->
+      <line x1="250" y1="150" x2="250" y2="490" stroke="#ef4444" stroke-width="0.8" stroke-dasharray="16,4,4,4"/>
 
-      <!-- ==================== RETRO TV MAIN CABINET ==================== -->
-      <!-- Cabinet 3D Depth Extrusion (Right & Top Side Panels) -->
-      <path d="M 120 -150 L 152 -130 L 152 10 L 120 -10 Z" fill="#d1c9bb" stroke="#b8ad9c" stroke-width="1.2"/>
-      <path d="M -120 -150 L -88 -170 L 152 -130 L 120 -150 Z" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.2"/>
+      <!-- Ground line -->
+      <line x1="90" y1="470" x2="410" y2="470" stroke="#475569" stroke-width="1.5"/>
 
-      <!-- Cabinet Front Main Body (Cream/Ivory Resin) -->
-      <rect x="-120" y="-150" width="240" height="155" rx="18" fill="url(#tvPlastic)" stroke="#b8ad9c" stroke-width="2"/>
+      <!-- 1. BASE: Plate width = 76mm, height = 4.5mm -->
+      <rect x="155.0" y="458.75" width="190.0" height="11.25"
+            fill="#131b28" stroke="#e2e8f0" stroke-width="1.5" rx="1"/>
 
-      <!-- Top User Buttons Opening & Wio Terminal ABC Buttons -->
-      <rect x="-55" y="-153" width="70" height="6" rx="3" fill="#cbd5e1"/>
-      <rect x="-48" y="-156" width="16" height="5" rx="2" fill="#475569"/><text x="-40" y="-158" fill="#94a3b8" font-size="6" text-anchor="middle">A</text>
-      <rect x="-26" y="-156" width="16" height="5" rx="2" fill="#475569"/><text x="-18" y="-158" fill="#94a3b8" font-size="6" text-anchor="middle">B</text>
-      <rect x="-4" y="-156" width="16" height="5" rx="2" fill="#475569"/><text x="4" y="-158" fill="#94a3b8" font-size="6" text-anchor="middle">C</text>
+      <!-- 2. BASE: Upright Clevis Arms (Arm L: -12.2 to -7.2, Arm R: 7.2 to 12.2) -->
+      <!-- Arm height from ground to pivot = 26.5mm, top radius = 8mm -> total top Z = 34.5mm -->
+      <rect x="219.5" y="403.75" width="12.5" height="55.0"
+            fill="#1e293b" stroke="#e2e8f0" stroke-width="1.5"/>
+      <circle cx="225.75" cy="403.75" r="20.0" fill="#1e293b" stroke="#e2e8f0" stroke-width="1.5"/>
 
-      <!-- Cute Cat Ears on Top -->
+      <rect x="268.0" y="403.75" width="12.5" height="55.0"
+            fill="#1e293b" stroke="#e2e8f0" stroke-width="1.5"/>
+      <circle cx="274.25" cy="403.75" r="20.0" fill="#1e293b" stroke="#e2e8f0" stroke-width="1.5"/>
+
+      <!-- Pivot center-line horizontal -->
+      <line x1="150.0" y1="403.75" x2="350.0" y2="403.75" stroke="#ef4444" stroke-width="0.8" stroke-dasharray="14,3,3,3"/>
+
+      <!-- Pivot hole in arms (diameter 3.6mm) -->
+      <circle cx="225.75" cy="403.75" r="4.5" fill="#090d16" stroke="#38bdf8" stroke-width="1"/>
+      <circle cx="274.25" cy="403.75" r="4.5" fill="#090d16" stroke="#38bdf8" stroke-width="1"/>
+
+      <!-- 3. HEAD: Bottom Hinge Lug (width 14mm: X from -7.0 to +7.0) -->
+      <!-- Lug extends down around pivot Z=26.5mm, from Z=19.5mm to Z=33.5mm -->
+      <rect x="232.5" y="386.25" width="35.0" height="35.0"
+            fill="#1e293b" stroke="#e2e8f0" stroke-width="1.5"/>
+      <circle cx="250" cy="403.75" r="17.5" fill="#1e293b" stroke="#e2e8f0" stroke-width="1.5"/>
+      <circle cx="250" cy="403.75" r="4.5" fill="#090d16" stroke="#e2e8f0" stroke-width="1"/>
+
+      <!-- 4. HEAD: Cabinet Body (Width 82mm: X=-41 to +41, Height 64mm: Z from 33.5mm to 97.5mm) -->
+      <rect x="147.5" y="226.25" width="205.0" height="160.0"
+            rx="12" fill="#131b28" stroke="#e2e8f0" stroke-width="2"/>
+
+      <!-- Screen Window Cutout: 50.0mm x 38.0mm (X centered at -5.0mm -> -30.0 to +20.0mm; Z centered at 32.0 in head -> Z=65.5mm from ground -> Y = vy_g - (65.5+19)*S to vy_g - (65.5-19)*S) -->
+      <rect x="175.0" y="258.75" width="125.0" height="95.0"
+            rx="6" fill="#090d16" stroke="#e2e8f0" stroke-width="1.5"/>
+      <!-- Inner LCD active area (48.6 x 36.5 mm) -->
+      <rect x="176.75" y="260.625" width="121.5" height="91.25"
+            rx="2" fill="#0f172a" stroke="#38bdf8" stroke-width="1" stroke-dasharray="3,2"/>
+      <text x="237.5" y="315.0" fill="#38bdf8" font-size="10" text-anchor="middle" font-family="monospace">2.4" LCD 320x240</text>
+
+      <!-- Right Panel: Dual Knobs (X = 27.0mm, diameter 10.0mm) -->
+      <!-- Knob 1: Z in head = 43.0mm -> from ground = 33.5 + 43.0 = 76.5mm -->
+      <circle cx="317.5" cy="278.75" r="12.5" fill="#1e293b" stroke="#e2e8f0" stroke-width="1.2"/>
+      <circle cx="317.5" cy="278.75" r="5.0" fill="#f59e0b"/>
+
+      <!-- Knob 2: Z in head = 23.0mm -> from ground = 33.5 + 23.0 = 56.5mm -->
+      <circle cx="317.5" cy="328.75" r="12.5" fill="#1e293b" stroke="#e2e8f0" stroke-width="1.2"/>
+      <circle cx="317.5" cy="328.75" r="5.0" fill="#f59e0b"/>
+
+      <!-- Front 5-way Joystick Opening: X = 25.0mm, Z in head = 17.0mm -> from ground = 50.5mm, diameter 15.0mm (radius 7.5mm) -->
+      <circle cx="312.5" cy="343.75" r="18.75" fill="#090d16" stroke="#e2e8f0" stroke-width="1.2"/>
+      <circle cx="312.5" cy="343.75" r="10.0" fill="#0284c7" stroke="#38bdf8" stroke-width="1"/>
+
+      <!-- Top Buttons Cutout: Width 42.0mm, X centered at -5.0mm -> -26.0 to +16.0mm, at top edge (Z=97.5mm) -->
+      <rect x="185.0" y="226.25" width="105.0" height="10.0"
+            fill="#090d16" stroke="#e2e8f0" stroke-width="1"/>
+
+      <!-- Two Cat Ears on Top: Base X=±(13.5 to 26.5), Peak at X=±20.0, Z=114.0mm from ground (80.5+33.5) -->
       <!-- Left Ear -->
-      <polygon points="-75,-150 -45,-150 -60,-182" fill="url(#tvPlastic)" stroke="#b8ad9c" stroke-width="1.5"/>
-      <polygon points="-70,-150 -50,-150 -60,-174" fill="#fbcfe8" opacity="0.8"/>
+      <polygon points="183.75,226.25 216.25,226.25 200.0,185.0"
+               fill="#131b28" stroke="#e2e8f0" stroke-width="1.5"/>
       <!-- Right Ear -->
-      <polygon points="45,-150 75,-150 60,-182" fill="url(#tvPlastic)" stroke="#b8ad9c" stroke-width="1.5"/>
-      <polygon points="50,-150 70,-150 60,-174" fill="#fbcfe8" opacity="0.8"/>
+      <polygon points="283.75,226.25 316.25,226.25 300.0,185.0"
+               fill="#131b28" stroke="#e2e8f0" stroke-width="1.5"/>
 
-      <!-- ==================== FRONT CRT SCREEN BEZEL ==================== -->
-      <!-- Curved CRT Tube Bezel Frame -->
-      <rect x="-105" y="-138" width="158" height="128" rx="14" fill="url(#crtBezel)" stroke="#453e34" stroke-width="2"/>
+      <!-- Side Knurled Knob (Right side of base arm: X from 12.2 to 22.2mm, diameter 18.6mm, centered at Z=26.5mm) -->
+      <rect x="280.5" y="380.5" width="25.0" height="46.5"
+            fill="#f59e0b" fill-opacity="0.2" stroke="#f59e0b" stroke-width="1.2" rx="2"/>
+      <line x1="288.0" y1="380.5" x2="288.0" y2="427.0" stroke="#f59e0b" stroke-width="1"/>
 
-      <!-- Screen Inset Border -->
-      <rect x="-97" y="-130" width="142" height="112" rx="10" fill="#000000" stroke="#1f2937" stroke-width="1.5"/>
+      <!-- DIMENSION LINES FOR VIEW 1 -->
+      <!-- Dim 1: Head Width = 82.0 mm (top) -->
+      <line x1="147.5" y1="175" x2="352.5" y2="175" stroke="#38bdf8" stroke-width="1" marker-start="url(#arrowRev)" marker-end="url(#arrow)"/>
+      <line x1="147.5" y1="170" x2="147.5" y2="226.25" stroke="#38bdf8" stroke-width="0.6"/>
+      <line x1="352.5" y1="170" x2="352.5" y2="226.25" stroke="#38bdf8" stroke-width="0.6"/>
+      <text x="250" y="170" fill="#38bdf8" font-size="11" font-weight="bold" text-anchor="middle">82.0</text>
 
-      <!-- Active 2.4" Display (Cozy Pixel Pet / Clock UI) -->
-      <rect x="-93" y="-126" width="134" height="104" rx="6" fill="url(#screenGlass)"/>
+      <!-- Dim 2: Base Width = 76.0 mm (bottom) -->
+      <line x1="155.0" y1="495" x2="345.0" y2="495" stroke="#38bdf8" stroke-width="1" marker-start="url(#arrowRev)" marker-end="url(#arrow)"/>
+      <line x1="155.0" y1="470" x2="155.0" y2="500" stroke="#38bdf8" stroke-width="0.6"/>
+      <line x1="345.0" y1="470" x2="345.0" y2="500" stroke="#38bdf8" stroke-width="0.6"/>
+      <text x="250" y="508" fill="#38bdf8" font-size="11" font-weight="bold" text-anchor="middle">76.0 (底座宽度)</text>
 
-      <!-- Screen UI Content (Pixel Pet "小维" Room & Clock) -->
-      <g transform="translate(-26, -74)">
-        <!-- Pixel Wallpaper pattern -->
-        <rect x="-65" y="-50" width="130" height="100" fill="#1e1b2e" rx="4"/>
-        <!-- Window with Rain/Night -->
-        <rect x="-56" y="-42" width="28" height="34" fill="#0f172a" stroke="#3b82f6" stroke-width="1.2" rx="2"/>
-        <line x1="-42" y1="-42" x2="-42" y2="-8" stroke="#3b82f6" stroke-width="1"/>
-        <line x1="-56" y1="-25" x2="-28" y2="-25" stroke="#3b82f6" stroke-width="1"/>
-        <!-- Moon in window -->
-        <circle cx="-35" cy="-34" r="3.5" fill="#fde047"/>
-        <!-- Cozy Fireplace Hearth -->
-        <rect x="26" y="-30" width="30" height="38" fill="#451a03" rx="2"/>
-        <polygon points="36,-8 46,-8 41,-22" fill="#f97316"/>
-        <polygon points="38,-8 44,-8 41,-18" fill="#fde047"/>
+      <!-- Dim 3: Screen Window = 50.0 mm -->
+      <line x1="175.0" y1="246.25" x2="300.0" y2="246.25" stroke="#38bdf8" stroke-width="1" marker-start="url(#arrowRev)" marker-end="url(#arrow)"/>
+      <text x="237.5" y="238.75" fill="#38bdf8" font-size="10" font-weight="bold" text-anchor="middle">50.0 (视窗)</text>
 
-        <!-- Desk Pet "小维" Character (Pixel Cat / Bot) -->
-        <g transform="translate(0, 8)">
-          <!-- Cat Body -->
-          <ellipse cx="0" cy="10" rx="19" ry="14" fill="#ffffff"/>
-          <!-- Cat Ears -->
-          <polygon points="-14,-2 -5,-2 -10,-14" fill="#ffffff"/>
-          <polygon points="-12,-2 -7,-2 -9.5,-10" fill="#f472b6"/>
-          <polygon points="5,-2 14,-2 10,-14" fill="#ffffff"/>
-          <polygon points="7,-2 12,-2 9.5,-10" fill="#f472b6"/>
-          <!-- Cat Head -->
-          <circle cx="0" cy="0" r="15" fill="#ffffff"/>
-          <!-- Big Anime Cute Blinking Eyes -->
-          <ellipse cx="-5" cy="-1" rx="3.5" ry="4.5" fill="#0f172a"/>
-          <circle cx="-6" cy="-2.5" r="1.5" fill="#ffffff"/>
-          <ellipse cx="5" cy="-1" rx="3.5" ry="4.5" fill="#0f172a"/>
-          <circle cx="4" cy="-2.5" r="1.5" fill="#ffffff"/>
-          <!-- Rosy Cheeks -->
-          <circle cx="-9" cy="4" r="2.2" fill="#fb7185" opacity="0.6"/>
-          <circle cx="9" cy="4" r="2.2" fill="#fb7185" opacity="0.6"/>
-          <!-- Cat Mouth -->
-          <path d="M -3 3 Q 0 5 3 3" fill="none" stroke="#0f172a" stroke-width="1.2" stroke-linecap="round"/>
-        </g>
+      <!-- Dim 4: Total Height = 114.0 mm (left side) -->
+      <line x1="125" y1="185.0" x2="125" y2="470" stroke="#38bdf8" stroke-width="1" marker-start="url(#arrowRev)" marker-end="url(#arrow)"/>
+      <line x1="200.0" y1="185.0" x2="120" y2="185.0" stroke="#38bdf8" stroke-width="0.6"/>
+      <line x1="155.0" y1="470" x2="120" y2="470" stroke="#38bdf8" stroke-width="0.6"/>
+      <text x="118" y="327.5" fill="#38bdf8" font-size="11" font-weight="bold" text-anchor="end">114.0</text>
 
-        <!-- Big 75px Digital Cyber Clock overlay on top -->
-        <rect x="-56" y="24" width="112" height="20" rx="4" fill="#000000" opacity="0.65"/>
-        <text x="0" y="38" fill="#38bdf8" font-size="12" font-weight="900" font-family="monospace" text-anchor="middle" letter-spacing="1">14:28:56</text>
-      </g>
+      <!-- Dim 5: Pivot Height = 26.5 mm -->
+      <line x1="180" y1="403.75" x2="180" y2="470" stroke="#38bdf8" stroke-width="1" marker-start="url(#arrowRev)" marker-end="url(#arrow)"/>
+      <text x="175" y="437.5" fill="#38bdf8" font-size="10" font-weight="bold" text-anchor="end">26.5</text>
 
-      <!-- Glass Glare Reflection -->
-      <path d="M -90 -124 L -40 -124 L -90 -40 Z" fill="#ffffff" opacity="0.08"/>
-
-      <!-- ==================== RIGHT VINTAGE CONTROL PANEL ==================== -->
-      <!-- Panel Divider Groove -->
-      <line x1="62" y1="-140" x2="62" y2="-5" stroke="#d1c9bb" stroke-width="1.5"/>
-
-      <!-- Upper Vintage Rotary Knob -->
-      <g transform="translate(88, -112)">
-        <circle cx="0" cy="0" r="15" fill="#d8d1c2" stroke="#b8ad9c" stroke-width="1"/>
-        <circle cx="0" cy="0" r="11" fill="url(#brassGold)" stroke="#ca8a04" stroke-width="1"/>
-        <circle cx="0" cy="0" r="5" fill="url(#brassGoldDark)"/>
-        <line x1="0" y1="-10" x2="0" y2="-4" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/>
-        <!-- Notch marks around knob -->
-        <circle cx="-16" cy="0" r="1" fill="#78716c"/>
-        <circle cx="16" cy="0" r="1" fill="#78716c"/>
-        <circle cx="0" cy="-16" r="1" fill="#78716c"/>
-        <circle cx="0" cy="16" r="1" fill="#78716c"/>
-      </g>
-
-      <!-- Lower Vintage Rotary Knob -->
-      <g transform="translate(88, -68)">
-        <circle cx="0" cy="0" r="15" fill="#d8d1c2" stroke="#b8ad9c" stroke-width="1"/>
-        <circle cx="0" cy="0" r="11" fill="url(#brassGold)" stroke="#ca8a04" stroke-width="1"/>
-        <circle cx="0" cy="0" r="5" fill="url(#brassGoldDark)"/>
-        <line x1="7" y1="-7" x2="3" y2="-3" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/>
-      </g>
-
-      <!-- 5-Way Joystick Cutout & Wio Joystick -->
-      <g transform="translate(88, -26)">
-        <circle cx="0" cy="0" r="12" fill="#2c2823" stroke="#453e34" stroke-width="1.2"/>
-        <!-- Blue Joystick Cross Cap -->
-        <circle cx="0" cy="0" r="6" fill="#0284c7" stroke="#38bdf8" stroke-width="1.2"/>
-        <path d="M 0 -4 L 0 4 M -4 0 L 4 0" stroke="#ffffff" stroke-width="1.5"/>
-      </g>
-
-      <!-- Speaker Acoustic Slits below screen -->
-      <line x1="-90" y1="-4" x2="-40" y2="-4" stroke="#8c8273" stroke-width="2" stroke-linecap="round"/>
-      <line x1="-30" y1="-4" x2="20" y2="-4" stroke="#8c8273" stroke-width="2" stroke-linecap="round"/>
-
-    </g> <!-- End Rotating Monitor Head -->
-
-    <!-- ==================== TILT ANGLE MOTION ARC & LABELS ==================== -->
-    <g transform="translate(-140, 20)">
-      <path d="M 0 20 A 70 70 0 0 1 35 -35" fill="none" stroke="#38bdf8" stroke-width="2.5" stroke-dasharray="4,3"/>
-      <polygon points="37,-38 41,-28 30,-32" fill="#38bdf8"/>
-      <!-- Angle Markers -->
-      <text x="-15" y="24" fill="#94a3b8" font-size="11" font-family="monospace">0°</text>
-      <text x="45" y="-36" fill="#38bdf8" font-size="12" font-weight="bold" font-family="monospace">45° 仰视</text>
-      <text x="18" y="-4" fill="#38bdf8" font-size="10" font-weight="bold">自由俯仰摆动</text>
+      <!-- Dim 6: Lug Width = 14.0 mm -->
+      <text x="250" y="460" fill="#10b981" font-size="9" text-anchor="middle">转轴凸耳: 14.0</text>
     </g>
+    
 
-  </g> <!-- End Main Left Panel -->
+    <!-- ==================== VIEW 2: SIDE ELEVATION & TILT TRAJECTORY ==================== -->
+    <g id="view_side">
+      <!-- View Title -->
+      <text x="720" y="125" fill="#f8fafc" font-size="15" font-weight="bold" text-anchor="middle">左视图 / 侧立面与俯仰轨迹 (SIDE ELEVATION)</text>
+      <text x="720" y="142" fill="#f59e0b" font-size="11" text-anchor="middle">显示 0° 垂直、25° 黄金工作视角、45° 最大俯仰范围</text>
 
-  <!-- ========================================================================= -->
-  <!-- RIGHT TOP PANEL: SIDE PROFILE TILT RANGE (0° ~ 45°)                       -->
-  <!-- ========================================================================= -->
-  <g transform="translate(680, 80)">
-    <!-- Panel Background Card -->
-    <rect x="0" y="0" width="370" height="290" rx="14" fill="#131b26" stroke="#232f3e" stroke-width="1.5"/>
-    <text x="24" y="36" fill="#ffffff" font-size="16" font-weight="bold">📐 侧面无级俯仰机构原理</text>
-    <text x="24" y="56" fill="#94a3b8" font-size="12">阻尼铰链 + 复古齿轮手拧锁紧旋钮</text>
+      <!-- Centerline through Pivot (Vertical at Y=0) -->
+      <line x1="720" y1="150" x2="720" y2="490" stroke="#ef4444" stroke-width="0.8" stroke-dasharray="16,4,4,4"/>
+      <!-- Centerline horizontal through Pivot (Z=26.5mm) -->
+      <line x1="620" y1="403.75" x2="870" y2="403.75" stroke="#ef4444" stroke-width="0.8" stroke-dasharray="16,4,4,4"/>
 
-    <!-- Side Diagram Schematic -->
-    <g transform="translate(80, 190)">
-      <!-- Base in side view -->
-      <path d="M -50 45 L 90 45 L 80 55 L -45 55 Z" fill="#334155"/>
-      <rect x="15" y="5" width="16" height="40" rx="4" fill="#1e293b"/>
-      <circle cx="23" cy="15" r="9" fill="#475569"/>
+      <!-- Ground line -->
+      <line x1="590" y1="470" x2="880" y2="470" stroke="#475569" stroke-width="1.5"/>
 
-      <!-- Position 1: 0° Vertical (Dashed line) -->
+      <!-- 1. BASE: Total Depth 72mm (Front = -30mm, Rear = +42mm, thickness 4.5mm) -->
+      <rect x="645.0" y="458.75" width="180.0" height="11.25"
+            fill="#131b28" stroke="#e2e8f0" stroke-width="1.5" rx="1"/>
+
+      <!-- Base Upright Clevis Arm (depth 18mm: Y from -9 to +9, centered at Y=0) -->
+      <rect x="697.5" y="403.75" width="45.0" height="55.0"
+            fill="#1e293b" stroke="#e2e8f0" stroke-width="1.5"/>
+      <circle cx="720" cy="403.75" r="20.0" fill="#1e293b" stroke="#e2e8f0" stroke-width="1.5"/>
+      <circle cx="720" cy="403.75" r="4.5" fill="#090d16" stroke="#38bdf8" stroke-width="1"/>
+
+      <!-- 2. POSITION 1: 0° Tilt (Vertical, Dashed) -->
       <g opacity="0.35">
-        <rect x="15" y="-105" width="16" height="120" rx="6" fill="#cbd5e1" stroke="#94a3b8" stroke-width="1"/>
-        <text x="4" y="-85" fill="#cbd5e1" font-size="10" font-family="monospace">0° 垂直</text>
+        <!-- Head cabinet side profile: Depth 26mm (Y from 0 to +26mm relative to front, lug centered at Y=13mm) -->
+        <!-- Relative to pivot Y=0: Head front is at Y = -13mm, rear is at Y = +13mm! -->
+        <rect x="687.5" y="226.25" width="65.0" height="160.0"
+              rx="4" fill="none" stroke="#e2e8f0" stroke-width="1.2" stroke-dasharray="4,3"/>
+        <text x="675.0" y="295.0" fill="#e2e8f0" font-size="10" font-family="monospace">0°</text>
       </g>
 
-      <!-- Position 2: 25° Optimal Desktop (Active) -->
-      <g transform="rotate(25, 23, 15)">
-        <rect x="15" y="-105" width="22" height="120" rx="6" fill="url(#tvPlastic)" stroke="#b8ad9c" stroke-width="1.5"/>
-        <!-- Screen side line -->
-        <line x1="15" y1="-95" x2="15" y2="-10" stroke="#38bdf8" stroke-width="3"/>
-        <polygon points="12,-105 22,-105 17,-120" fill="url(#tvPlastic)"/>
+      <!-- 3. POSITION 3: 45° Tilt (Max Angle, Dashed) -->
+      <g transform="rotate(45, 720, 403.75)" opacity="0.35">
+        <rect x="687.5" y="226.25" width="65.0" height="160.0"
+              rx="4" fill="none" stroke="#e2e8f0" stroke-width="1.2" stroke-dasharray="4,3"/>
+        <text x="725.0" y="282.5" fill="#e2e8f0" font-size="10" font-family="monospace">45°</text>
       </g>
 
-      <!-- Position 3: 45° Max Tilt (Dashed line) -->
-      <g transform="rotate(45, 23, 15)" opacity="0.35">
-        <rect x="15" y="-105" width="16" height="120" rx="6" fill="#cbd5e1" stroke="#94a3b8" stroke-width="1"/>
-        <text x="25" y="-110" fill="#cbd5e1" font-size="10" font-family="monospace">45°</text>
+      <!-- 4. POSITION 2: 25° Tilt (Recommended Active Operating Position) -->
+      <g transform="rotate(25, 720, 403.75)">
+        <!-- Lug connecting to pivot (centered at Y=0, Z=26.5mm) -->
+        <rect x="700.0" y="386.25" width="40.0" height="35.0"
+              fill="#1e293b" stroke="#e2e8f0" stroke-width="1.2"/>
+
+        <!-- Head Cabinet: Depth 26mm (Y from -13 to +13mm), Height 64mm (Z from 33.5 to 97.5mm) -->
+        <rect x="687.5" y="226.25" width="65.0" height="160.0"
+              rx="8" fill="#131b28" stroke="#e2e8f0" stroke-width="2"/>
+
+        <!-- Front Screen active display line (Cyan glowing) -->
+        <line x1="687.5" y1="260.625" x2="687.5" y2="351.875"
+              stroke="#38bdf8" stroke-width="3"/>
+
+        <!-- Front Rotary Knob protrusion (sticking out 3.0mm at front) -->
+        <rect x="680.0" y="266.25" width="7.5" height="25.0" fill="#f59e0b"/>
+        <rect x="680.0" y="316.25" width="7.5" height="25.0" fill="#f59e0b"/>
+
+        <!-- Rear Sound Slits (depth 2.2mm at rear wall) -->
+        <rect x="747.5" y="270.0" width="5.0" height="62.5" fill="#475569"/>
+
+        <!-- Top Cat Ear side profile -->
+        <polygon points="702.5,226.25 737.5,226.25 720,185.0"
+                 fill="#131b28" stroke="#e2e8f0" stroke-width="1.2"/>
       </g>
 
-      <!-- Pivot Center & Knurled Knob -->
-      <circle cx="23" cy="15" r="11" fill="url(#brassGold)" stroke="#ca8a04" stroke-width="1"/>
-      <circle cx="23" cy="15" r="4" fill="#713f12"/>
+      <!-- Center Pivot Knob Circle in Side View -->
+      <circle cx="720" cy="403.75" r="23.25" fill="#f59e0b" fill-opacity="0.3" stroke="#f59e0b" stroke-width="1.5"/>
+      <circle cx="720" cy="403.75" r="4.5" fill="#090d16" stroke="#e2e8f0" stroke-width="1"/>
 
-      <!-- Tilt Travel Arc -->
-      <path d="M 23 -85 A 100 100 0 0 1 85 -55" fill="none" stroke="#38bdf8" stroke-width="2" stroke-dasharray="3,3"/>
-      <polygon points="87,-54 82,-62 78,-52" fill="#38bdf8"/>
+      <!-- TILT SWEEP ARC (0° to 45°) -->
+      <path d="M 720 257.5 A 146.25 146.25 0 0 1 823.4143667485325 300.33563325146747"
+            fill="none" stroke="#38bdf8" stroke-width="1.8" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+      <text x="807.5" y="282.5" fill="#38bdf8" font-size="11" font-weight="bold">0° ~ 45° 俯仰行程</text>
+
+      <!-- DIMENSIONS FOR VIEW 2 -->
+      <!-- Dim 1: Base Total Depth = 72.0 mm (bottom) -->
+      <line x1="645.0" y1="495" x2="825.0" y2="495" stroke="#38bdf8" stroke-width="1" marker-start="url(#arrowRev)" marker-end="url(#arrow)"/>
+      <line x1="645.0" y1="470" x2="645.0" y2="500" stroke="#38bdf8" stroke-width="0.6"/>
+      <line x1="825.0" y1="470" x2="825.0" y2="500" stroke="#38bdf8" stroke-width="0.6"/>
+      <text x="735.0" y="508" fill="#38bdf8" font-size="11" font-weight="bold" text-anchor="middle">72.0 (底座深度: 前30 / 后42)</text>
+
+      <!-- Dim 2: Head Thickness = 26.0 mm -->
+      <text x="657.5" y="245.0" fill="#38bdf8" font-size="10" font-weight="bold" text-anchor="end">机身厚度: 26.0</text>
+
+      <!-- Anti-tip Safety Callout -->
+      <rect x="840.0" y="430" width="160" height="42" rx="4" fill="#1e293b" stroke="#10b981" stroke-width="1"/>
+      <text x="855.0" y="446" fill="#10b981" font-size="10" font-weight="bold">✓ 物理防倾覆力学设计：</text>
+      <text x="855.0" y="460" fill="#94a3b8" font-size="9">后脚跟延伸42mm，后倾余量27.8mm</text>
     </g>
+    
 
-    <!-- Legend & Feature List -->
-    <g transform="translate(200, 95)" font-size="12">
-      <circle cx="0" cy="8" r="4" fill="#38bdf8"/>
-      <text x="14" y="12" fill="#e2e8f0" font-weight="bold">0° 垂直角度</text>
-      <text x="14" y="28" fill="#94a3b8" font-size="11">适合站姿办公或远距离看板</text>
+    <!-- ==================== VIEW 3: TOP PLAN VIEW ==================== -->
+    <g id="view_top">
+      <text x="250" y="560" fill="#f8fafc" font-size="15" font-weight="bold" text-anchor="middle">俯视图 / 平面图 (TOP PLAN VIEW)</text>
+      <text x="250" y="576" fill="#64748b" font-size="11" text-anchor="middle">视角：从上往下俯视底盘与机身顶部</text>
 
-      <circle cx="0" cy="50" r="4" fill="#fde047"/>
-      <text x="14" y="54" fill="#e2e8f0" font-weight="bold">25° ~ 30° 黄金视距</text>
-      <text x="14" y="70" fill="#94a3b8" font-size="11">桌面坐姿正常对视，最舒服</text>
+      <!-- Centerlines -->
+      <line x1="250" y1="530.0" x2="250" y2="830.0" stroke="#ef4444" stroke-width="0.8" stroke-dasharray="14,3,3,3"/>
+      <line x1="112.5" y1="680" x2="387.5" y2="680" stroke="#ef4444" stroke-width="0.8" stroke-dasharray="14,3,3,3"/>
 
-      <circle cx="0" cy="92" r="4" fill="#38bdf8"/>
-      <text x="14" y="96" fill="#e2e8f0" font-weight="bold">45° 大仰视角度</text>
-      <text x="14" y="112" fill="#94a3b8" font-size="11">低矮茶几或站立低头视察</text>
+      <!-- Base Plate: 76.0mm wide (-38 to +38), 72.0mm deep (-30 to +42) -->
+      <!-- In top view: Y axis goes down (+Y is rear, -Y is front) -->
+      <rect x="155.0" y="605.0" width="190.0" height="180.0"
+            fill="#131b28" stroke="#e2e8f0" stroke-width="1.5" rx="3"/>
 
-      <rect x="0" y="132" width="150" height="26" rx="6" fill="#38bdf8" fill-opacity="0.1" stroke="#38bdf8" stroke-width="1"/>
-      <text x="75" y="149" fill="#38bdf8" font-size="11" font-weight="bold" text-anchor="middle">🤏 随手一拧即锁死</text>
+      <!-- 4 Coin Ballast Wells (Hidden dashed circles on bottom): diameter 25.5mm -->
+      <circle cx="207.5" cy="655.0" r="31.875" fill="none" stroke="#475569" stroke-width="0.8" stroke-dasharray="3,2"/>
+      <circle cx="292.5" cy="655.0" r="31.875" fill="none" stroke="#475569" stroke-width="0.8" stroke-dasharray="3,2"/>
+      <circle cx="207.5" cy="735.0" r="31.875" fill="none" stroke="#475569" stroke-width="0.8" stroke-dasharray="3,2"/>
+      <circle cx="292.5" cy="735.0" r="31.875" fill="none" stroke="#475569" stroke-width="0.8" stroke-dasharray="3,2"/>
+      <text x="207.5" y="660.0" fill="#475569" font-size="8" text-anchor="middle">硬币槽</text>
+      <text x="292.5" y="660.0" fill="#475569" font-size="8" text-anchor="middle">硬币槽</text>
+
+      <!-- Head Top Outline (82.0mm wide x 26.0mm deep) -->
+      <rect x="147.5" y="647.5" width="205.0" height="65.0"
+            rx="6" fill="#1e293b" stroke="#e2e8f0" stroke-width="1.5"/>
+
+      <!-- Top Buttons Opening: 42.0mm x 8.0mm -->
+      <rect x="185.0" y="670.0" width="105.0" height="20.0"
+            rx="2" fill="#090d16" stroke="#38bdf8" stroke-width="1"/>
+      <text x="237.5" y="685.0" fill="#38bdf8" font-size="9" text-anchor="middle">A / B / C 键位</text>
+
+      <!-- Top Cat Ears top footprint -->
+      <polygon points="183.75,662.5 216.25,662.5 200.0,697.5" fill="#f59e0b" opacity="0.6"/>
+      <polygon points="283.75,662.5 316.25,662.5 300.0,697.5" fill="#f59e0b" opacity="0.6"/>
+
+      <!-- Side Knob profile on right: 10mm thick, 18.6mm wide -->
+      <rect x="345.0" y="667.5" width="25.0" height="46.5"
+            fill="#f59e0b" fill-opacity="0.3" stroke="#f59e0b" stroke-width="1.2" rx="2"/>
+
+      <!-- Dimensions for Top View -->
+      <text x="137.5" y="680" fill="#38bdf8" font-size="10" text-anchor="end">76.0 x 72.0 底座轮廓</text>
     </g>
-  </g>
+    
 
-  <!-- ========================================================================= -->
-  <!-- RIGHT BOTTOM PANEL: INTERNAL HARDWARE ARCHITECTURE (CUTAWAY)              -->
-  <!-- ========================================================================= -->
-  <g transform="translate(680, 395)">
-    <!-- Panel Background Card -->
-    <rect x="0" y="0" width="370" height="340" rx="14" fill="#131b26" stroke="#232f3e" stroke-width="1.5"/>
-    <text x="24" y="36" fill="#ffffff" font-size="16" font-weight="bold">🎛️ 内部音腔与免焊接硬件布局</text>
-    <text x="24" y="56" fill="#94a3b8" font-size="12">大容量背部隐藏腔室，0 焊锡杜邦线插拔</text>
+    <!-- ==================== VIEW 4: BOM & ASSEMBLY TABLE ==================== -->
+    <g transform="translate(560, 560)">
+      <!-- Panel Card Background -->
+      <rect x="0" y="0" width="670" height="260" rx="6" fill="#101726" stroke="#223046" stroke-width="1.5"/>
 
-    <!-- Cutaway Exploded Architecture Graphic -->
-    <g transform="translate(24, 75)">
+      <!-- Table Header -->
+      <rect x="0" y="0" width="670" height="34" rx="6" fill="#1a2538"/>
+      <text x="16" y="22" fill="#f8fafc" font-size="13" font-weight="bold">PARTS LIST &amp; SPECIFICATIONS (3D打印零件与装配五金清单)</text>
 
-      <!-- Component 1: Wio Terminal Main Unit -->
-      <rect x="0" y="0" width="322" height="42" rx="8" fill="#1e293b" stroke="#38bdf8" stroke-width="1.2"/>
-      <rect x="10" y="8" width="26" height="26" rx="4" fill="#0284c7"/>
-      <text x="23" y="25" fill="#ffffff" font-size="10" font-weight="bold" text-anchor="middle">WIO</text>
-      <text x="46" y="20" fill="#f8fafc" font-size="13" font-weight="bold">Wio Terminal 2.4" 主机</text>
-      <text x="46" y="34" fill="#94a3b8" font-size="11">原厂屏幕 + SAMD51 + 摇杆直接自前框嵌入</text>
-
-      <!-- Component 2: MAX98357A I2S DAC Amp -->
-      <g transform="translate(0, 52)">
-        <rect x="0" y="0" width="322" height="42" rx="8" fill="#1e293b" stroke="#ca8a04" stroke-width="1.2"/>
-        <rect x="10" y="8" width="26" height="26" rx="4" fill="#ca8a04"/>
-        <text x="23" y="25" fill="#ffffff" font-size="9" font-weight="bold" text-anchor="middle">AMP</text>
-        <text x="46" y="20" fill="#f8fafc" font-size="13" font-weight="bold">MAX98357A I2S 功放模块</text>
-        <text x="46" y="34" fill="#94a3b8" font-size="11">5 根杜邦线对插 40-Pin，高保真数字解码发声</text>
+      <!-- Table Columns -->
+      <!-- Row 1: Head -->
+      <g transform="translate(16, 52)">
+        <text x="0" y="14" fill="#38bdf8" font-size="12" font-weight="bold">[01] 机头组件 (wio_tilt_tv_head.stl)</text>
+        <text x="320" y="14" fill="#e2e8f0" font-size="12">82.0 × 26.0 × 94.5 mm</text>
+        <text x="510" y="14" fill="#94a3b8" font-size="11">51.2g (象牙白 9600树脂)</text>
+        <text x="0" y="28" fill="#64748b" font-size="11">内含 73×13×58mm Wio容纳槽 + 70×10×54mm 音腔/电池仓 + 14mm 转轴凸耳</text>
       </g>
+      <line x1="16" y1="88" x2="654" y2="88" stroke="#1e2c40" stroke-width="1"/>
 
-      <!-- Component 3: 8Ω 2W Cavity Speaker -->
-      <g transform="translate(0, 104)">
-        <rect x="0" y="0" width="322" height="42" rx="8" fill="#1e293b" stroke="#ec4899" stroke-width="1.2"/>
-        <rect x="10" y="8" width="26" height="26" rx="4" fill="#ec4899"/>
-        <text x="23" y="25" fill="#ffffff" font-size="9" font-weight="bold" text-anchor="middle">SPK</text>
-        <text x="46" y="20" fill="#f8fafc" font-size="13" font-weight="bold">8Ω 2W 独立共鸣腔小喇叭</text>
-        <text x="46" y="34" fill="#94a3b8" font-size="11">对准背板百叶窗出音孔，人声洪亮通透</text>
+      <!-- Row 2: Base -->
+      <g transform="translate(16, 96)">
+        <text x="0" y="14" fill="#38bdf8" font-size="12" font-weight="bold">[02] 俯仰底座 (wio_tilt_tv_base.stl)</text>
+        <text x="320" y="14" fill="#e2e8f0" font-size="12">76.0 × 72.0 × 34.5 mm</text>
+        <text x="510" y="14" fill="#94a3b8" font-size="11">23.5g (深空灰/哑光黑)</text>
+        <text x="0" y="28" fill="#64748b" font-size="11">双叉内间距 14.4mm (间隙0.4mm顺滑摆动) + 后脚跟延展42mm + 4硬币配重槽</text>
       </g>
+      <line x1="16" y1="132" x2="654" y2="132" stroke="#1e2c40" stroke-width="1"/>
 
-      <!-- Component 4: 1000mAh Battery (Optional) -->
-      <g transform="translate(0, 156)">
-        <rect x="0" y="0" width="322" height="42" rx="8" fill="#1e293b" stroke="#10b981" stroke-width="1.2"/>
-        <rect x="10" y="8" width="26" height="26" rx="4" fill="#10b981"/>
-        <text x="23" y="25" fill="#ffffff" font-size="9" font-weight="bold" text-anchor="middle">BAT</text>
-        <text x="46" y="20" fill="#f8fafc" font-size="13" font-weight="bold">1000mAh 超薄聚合物锂电池</text>
-        <text x="46" y="34" fill="#94a3b8" font-size="11">可选装 603040 电池，摆脱线缆束缚随手拿</text>
+      <!-- Row 3: Knob -->
+      <g transform="translate(16, 140)">
+        <text x="0" y="14" fill="#38bdf8" font-size="12" font-weight="bold">[03] 阻尼旋钮 (wio_tilt_tv_knob.stl)</text>
+        <text x="320" y="14" fill="#e2e8f0" font-size="12">外径 Φ18.6 × 10.0 mm</text>
+        <text x="510" y="14" fill="#94a3b8" font-size="11">2.1g (黄铜/金橙色)</text>
+        <text x="0" y="28" fill="#64748b" font-size="11">12齿防滑齿轮手拧轮，内嵌 M3 六角螺母沉槽 (对边6.1mm，深3.5mm)</text>
       </g>
+      <line x1="16" y1="176" x2="654" y2="176" stroke="#1e2c40" stroke-width="1"/>
 
-      <!-- Summary Pill -->
-      <g transform="translate(0, 210)">
-        <rect x="0" y="0" width="322" height="34" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-        <text x="161" y="22" fill="#38bdf8" font-size="12" font-weight="bold" text-anchor="middle">🔥 全套配件成本约 15~20 元，淘宝直接配齐</text>
+      <!-- Row 4: Hardware Assembly -->
+      <g transform="translate(16, 184)">
+        <text x="0" y="14" fill="#f59e0b" font-size="12" font-weight="bold">[04] 标准装配五金 (外购件)</text>
+        <text x="320" y="14" fill="#e2e8f0" font-size="12">M3 × 25mm 螺栓 1根 + M3 螺母 1个</text>
+        <text x="0" y="28" fill="#64748b" font-size="11">螺栓穿过底座双叉与机头凸耳，螺母压入旋钮，实现 0°~45° 自由无级手拧锁死</text>
       </g>
+      <line x1="16" y1="220" x2="654" y2="220" stroke="#1e2c40" stroke-width="1"/>
 
+      <!-- Footer Note -->
+      <g transform="translate(16, 226)">
+        <text x="0" y="18" fill="#10b981" font-size="12" font-weight="bold">★ 合盘单文件：cad/stl/wio_tilt_tv_plate.stl (总重 76.5g，单文件上传免除多份开机费)</text>
+      </g>
     </g>
-  </g>
-
-  <!-- ========================================================================= -->
-  <!-- BOTTOM STATUS FOOTER BAR                                                  -->
-  <!-- ========================================================================= -->
-  <g transform="translate(60, 715)">
-    <rect x="0" y="0" width="580" height="38" rx="8" fill="#131b26" stroke="#232f3e" stroke-width="1"/>
-    <text x="24" y="24" fill="#94a3b8" font-size="12">
-      <tspan font-weight="bold" fill="#ffffff">整机规格：</tspan> 82 × 96 × 68 mm  |  
-      <tspan font-weight="bold" fill="#ffffff">整套克重：</tspan> 约 75g (合盘一锅出)  |  
-      <tspan font-weight="bold" fill="#ffffff">材质：</tspan> 9600 高韧白树脂
-    </text>
-  </g>
-
+    
 </svg>
