@@ -29,22 +29,23 @@ void wioSenseConfig(int darkTh, int lightTh, int shakeMg, int pickupMg, uint32_t
 // 光线传感器(PD01/AIN15)与麦克风(AIN12)共用 ADC1:麦克风让 ADC1 自由运行 + DMA 持续搬运。
 // 这里临时把通道切到光线(并加长采样时间)、等几次转换、读结果,再恢复麦克风的设置;ADC1 全程不停。
 static int readLightShared() {
+  if (!ADC1->CTRLA.bit.ENABLE) return 0;
   const uint8_t micCh = g_APinDescription[WIO_MIC].ulADCChannelNumber;
   const uint8_t micSamplen = ADC1->SAMPCTRL.bit.SAMPLEN;
   ADC1->SAMPCTRL.bit.SAMPLEN = 63;  // 光敏电路内阻高:麦克风设的最短采样时间充不满采样电容,读数会接近 0
-  while (ADC1->SYNCBUSY.bit.SAMPCTRL) {
-  }
+  uint16_t to = 1000;
+  while (ADC1->SYNCBUSY.bit.SAMPCTRL && --to) {}
   ADC1->INPUTCTRL.bit.MUXPOS = g_APinDescription[WIO_LIGHT].ulADCChannelNumber;
-  while (ADC1->SYNCBUSY.bit.INPUTCTRL) {
-  }
+  to = 1000;
+  while (ADC1->SYNCBUSY.bit.INPUTCTRL && --to) {}
   delay(2);  // 等若干次转换,丢掉切换前旧通道/旧采样时间的结果
   const int v = ADC1->RESULT.reg;  // 12 bit
   ADC1->INPUTCTRL.bit.MUXPOS = micCh;
-  while (ADC1->SYNCBUSY.bit.INPUTCTRL) {
-  }
+  to = 1000;
+  while (ADC1->SYNCBUSY.bit.INPUTCTRL && --to) {}
   ADC1->SAMPCTRL.bit.SAMPLEN = micSamplen;
-  while (ADC1->SYNCBUSY.bit.SAMPCTRL) {
-  }
+  to = 1000;
+  while (ADC1->SYNCBUSY.bit.SAMPCTRL && --to) {}
   return v >> 2;  // 折算成 0-1023,与阈值量程一致
 }
 
@@ -76,14 +77,31 @@ int wioSensePoll() {
     (void)r;
 #endif
   }
+  static bool isFaceDown = false;
   if (imuOk && now >= imuNext) {
     imuNext = now + 50;
     lastAx = (int)(lis.getAccelerationX() * 1000);
     lastAy = (int)(lis.getAccelerationY() * 1000);
     lastAz = (int)(lis.getAccelerationZ() * 1000);
+
+    // 翻转检测: 正常平放屏幕朝上时 Z 轴约为 -1000mg; 扣在桌面上屏幕朝下时 Z 轴翻转为 > +650mg
+    if (lastAz > 650) {
+      if (!isFaceDown) {
+        isFaceDown = true;
+        ev = SE_FACEDOWN;
+      }
+    } else if (lastAz < -150) {
+      if (isFaceDown) {
+        isFaceDown = false;
+        ev = SE_FACEUP;
+      }
+    }
+
     const int m = motionDet.update(lastAx, lastAy, lastAz, (uint32_t)now);
-    if (m == MOTION_SHAKE) ev = SE_SHAKE;
-    else if (m == MOTION_PICKUP && ev == SE_NONE) ev = SE_PICKUP;
+    if (ev == SE_NONE) {
+      if (m == MOTION_SHAKE) ev = SE_SHAKE;
+      else if (m == MOTION_PICKUP) ev = SE_PICKUP;
+    }
   }
 #if WIO_SENSE_DEBUG
   if (now >= senseDbgNext) {
@@ -96,6 +114,8 @@ int wioSensePoll() {
     Serial.print(lastAy);
     Serial.print(",");
     Serial.print(lastAz);
+    Serial.print(" facedown=");
+    Serial.print(isFaceDown ? 1 : 0);
     Serial.print(" adc1_en=");  // 麦克风要求 ADC1 保持使能且通道停在 AIN12
     Serial.print(ADC1->CTRLA.bit.ENABLE);
     Serial.print(" mux=");
@@ -103,4 +123,8 @@ int wioSensePoll() {
   }
 #endif
   return ev;
+}
+
+bool wioSenseIsFaceDown() {
+  return (lastAz > 650);
 }

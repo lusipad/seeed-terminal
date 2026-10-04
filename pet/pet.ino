@@ -5,7 +5,11 @@
 // 状态机、表情人设(pet_face/pet_anim)、系统提示词、密钥。
 
 #include <Arduino.h>
+#include <unistd.h>
 #include <Seeed_GFX.h>
+
+enum PetState { ST_IDLE, ST_RECORD, ST_THINK, ST_SHOW, ST_SLEEP, ST_CONFIG };
+PetState state = ST_IDLE;
 
 #include <WioKitLogic.h>   // L0 纯逻辑(HTTP 判停/chunked/情绪标签/探测器)
 #include <WioKitCjk.h>     // L1 中文渲染(字库在库里,~150KB Flash)
@@ -34,12 +38,62 @@
 #endif
 
 Seeed_GFX display(Seeed_Product::Wio_Terminal);
+
+WioConfig activeConfig;
+bool hasActiveConfig = false;
+static String petSysPrompt;
+
+#include "pet_pages.h"
 #include "pet_face.h"
 #include "pet_anim.h"
 
-static WioConfig activeConfig;
-static bool hasActiveConfig = false;
-static String petSysPrompt;
+// 桌面多功能看板状态定义
+int curPage = PAGE_PET;
+int lastPageBeforeVoice = PAGE_PET;
+uint32_t netEpochBase = 0;
+uint32_t netEpochMillis = 0;
+bool hasSyncedTime = false;
+uint32_t nextTimeSyncMs = 0;
+
+uint32_t pomoRemainingSec = POMO_DURATION_SEC;
+bool pomoRunning = false;
+uint32_t pomoLastTickMs = 0;
+int pomoCompletedTotal = 0;
+bool pomoJustFinished = false;
+
+void startPomodoro() {
+  if (!pomoRunning) {
+    pomoRunning = true;
+    pomoLastTickMs = millis();
+  }
+}
+
+void pausePomodoro() {
+  pomoRunning = false;
+}
+
+void resetPomodoro() {
+  pomoRunning = false;
+  pomoRemainingSec = POMO_DURATION_SEC;
+  pomoJustFinished = false;
+}
+
+void tickPomodoroLogic() {
+  if (!pomoRunning) return;
+  const unsigned long now = millis();
+  if (now - pomoLastTickMs >= 1000) {
+    const uint32_t secPassed = (now - pomoLastTickMs) / 1000;
+    pomoLastTickMs += secPassed * 1000;
+    if (pomoRemainingSec > secPassed) {
+      pomoRemainingSec -= secPassed;
+    } else {
+      pomoRemainingSec = 0;
+      pomoRunning = false;
+      pomoCompletedTotal++;
+      pomoJustFinished = true;
+    }
+  }
+}
 
 const int PIN_KEY_A = WIO_KEY_A;
 const int PIN_KEY_B = WIO_KEY_B;
@@ -63,7 +117,7 @@ const uint32_t PET_TRAILING_MS = 1200;  // 说完静音多久自动停(放宽到
 const char* getPetSystemPrompt() {
   petSysPrompt = "你是电子桌宠\"小维\",性格活泼元气,说话简短、口语化、爱用感叹号。"
                  "回答必须以情绪标签开头,格式如 [开心],情绪只能从 开心/兴奋/惊讶/害羞/疑惑/难过 里选一个;"
-                 "标签后直接是回答正文,用简体中文,45字以内,不要任何其他前缀或解释。";
+                 "标签后直接是回答正文,用简体中文,45字以内,不要使用Emoji表情,不要使用Markdown符号(如*、#),直接说纯文本。";
   if (hasActiveConfig && strlen(activeConfig.city) > 0) {
     petSysPrompt += "主人常驻城市是: ";
     petSysPrompt += activeConfig.city;
@@ -72,9 +126,15 @@ const char* getPetSystemPrompt() {
   return petSysPrompt.c_str();
 }
 
+void handleTestCommands();
+void petYieldLoop() {
+  handleTestCommands();
+  petAnimTick();
+}
+
 void applyActiveConfig() {
   if (hasActiveConfig && strlen(activeConfig.ssid) > 0) {
-    wioNetSetYield(petAnimTick);
+    wioNetSetYield(petYieldLoop);
     wioNetBegin(activeConfig.ssid, activeConfig.pass);
     wioAsrBaiduBegin(activeConfig.baiduApiKey, activeConfig.baiduSecret);
     wioLlmDeepSeekBegin(activeConfig.deepseekKey, getPetSystemPrompt());
@@ -201,8 +261,25 @@ bool petProcessVoice(uint32_t samples, bool bufferFull, String& transcript, Stri
 // 状态机
 // ============================================================
 
-enum PetState { ST_IDLE, ST_RECORD, ST_THINK, ST_SHOW, ST_SLEEP, ST_CONFIG };
-PetState state = ST_IDLE;
+const char* petStateStr(PetState s) {
+  switch (s) {
+    case ST_IDLE: return "ST_IDLE";
+    case ST_RECORD: return "ST_RECORD";
+    case ST_THINK: return "ST_THINK";
+    case ST_SHOW: return "ST_SHOW";
+    case ST_SLEEP: return "ST_SLEEP";
+    case ST_CONFIG: return "ST_CONFIG";
+    default: return "UNKNOWN";
+  }
+}
+
+void petSetState(PetState s) {
+  if (state != s) {
+    state = s;
+    Serial.print("!STATE ");
+    Serial.println(petStateStr(s));
+  }
+}
 unsigned long stateStart = 0;
 unsigned long showUntil = 0;
 uint32_t recSamples = 0;
@@ -216,6 +293,11 @@ const int PET_DIM_LEVEL = 40;                // 睡觉时背光 PWM(0-255)
 void setBacklight(bool dim) {
   (void)dim;
   (void)PET_DIM_LEVEL;
+}
+
+void setBacklightPower(bool on) {
+  pinMode(LCD_BACKLIGHT, OUTPUT);
+  digitalWrite(LCD_BACKLIGHT, on ? HIGH : LOW);
 }
 
 // Emotion(WioKitLogic.h)→ 表情;顺序必须与 enum Emotion 一致:开心 兴奋 惊讶 害羞 疑惑 难过
@@ -233,11 +315,30 @@ String friendlyNote(const String& note) {
 }
 
 void drawIdleHint() {
-  drawTextCJK("按 B 说话, 按 A 配网", 64, 218, 320, TFT_LIGHTGREY, C_BOTTOM_BG);
+  drawTextCJK("按 B 说话 | 摇杆切页 | 压下互动", 34, 218, 320, TFT_LIGHTGREY, C_BOTTOM_BG);
+}
+
+void switchPage(int newPage) {
+  if (newPage < 0) newPage = 2;
+  if (newPage > 2) newPage = 0;
+  curPage = newPage;
+  lastPageBeforeVoice = curPage;
+  lastInteract = millis();
+  if (state == ST_IDLE) {
+    if (curPage == PAGE_PET) {
+      drawPet(F_NORMAL);
+      drawIdleHint();
+      petAnimSet(A_IDLE);
+    } else if (curPage == PAGE_CLOCK) {
+      drawClockPage(true);
+    } else if (curPage == PAGE_FOCUS) {
+      drawFocusPage(true);
+    }
+  }
 }
 
 void enterConfig() {
-  state = ST_CONFIG;
+  petSetState(ST_CONFIG);
   stateStart = millis();
   beep(1200, 80);
   drawPet(F_LISTEN);
@@ -252,16 +353,23 @@ void enterConfig() {
 }
 
 void enterIdle() {
-  state = ST_IDLE;
+  petSetState(ST_IDLE);
   stateStart = millis();
-  drawPet(F_NORMAL);
-  drawIdleHint();
-  petAnimSet(A_IDLE);
+  curPage = lastPageBeforeVoice;
+  if (curPage == PAGE_PET) {
+    drawPet(F_NORMAL);
+    drawIdleHint();
+    petAnimSet(A_IDLE);
+  } else if (curPage == PAGE_CLOCK) {
+    drawClockPage(true);
+  } else if (curPage == PAGE_FOCUS) {
+    drawFocusPage(true);
+  }
 }
 
 // 显示一段表情 + 气泡,durMs 后自动回待机(期间按键也可提前返回)
 void enterShow(int face, const String& t1, uint16_t c1, const String& t2, uint32_t durMs) {
-  state = ST_SHOW;
+  petSetState(ST_SHOW);
   stateStart = millis();
   showUntil = millis() + durMs;
   drawPet(face);
@@ -272,7 +380,7 @@ void enterShow(int face, const String& t1, uint16_t c1, const String& t2, uint32
 void enterSleep() {
   Serial.println("P: sleep");
   clearChatHistory();
-  state = ST_SLEEP;
+  petSetState(ST_SLEEP);
   stateStart = millis();
   drawPet(F_SLEEP);
   petAnimSet(A_SLEEP);
@@ -283,7 +391,7 @@ void wakeUp() {
   Serial.println("P: wake");
   setBacklight(false);
   lastInteract = millis();
-  state = ST_IDLE;
+  petSetState(ST_IDLE);
   stateStart = millis();
   drawPet(F_SLEEP);
   drawIdleHint();
@@ -292,7 +400,7 @@ void wakeUp() {
 
 void startDizzy() {
   lastInteract = millis();
-  state = ST_SHOW;
+  petSetState(ST_SHOW);
   stateStart = millis();
   showUntil = millis() + 3000;
   drawPet(F_DIZZY);
@@ -306,6 +414,36 @@ void handleSense() {
   if (ev == SE_NONE) return;
   Serial.print("S: event=");
   Serial.println(ev);
+
+  // 翻转事件检测 (Flip-to-Focus 扣下即专注)
+  if (ev == SE_FACEDOWN) {
+    Serial.println("P: flip facedown -> focus mode");
+    lastInteract = millis();
+    curPage = PAGE_FOCUS;
+    lastPageBeforeVoice = PAGE_FOCUS;
+    startPomodoro();
+    setBacklightPower(false);
+    beep(880, 40);
+    return;
+  }
+  if (ev == SE_FACEUP) {
+    Serial.println("P: flip faceup -> restore display");
+    lastInteract = millis();
+    setBacklightPower(true);
+    beep(1319, 60);
+    if (state == ST_IDLE) {
+      if (curPage == PAGE_FOCUS) {
+        drawFocusPage(true);
+      } else if (curPage == PAGE_CLOCK) {
+        drawClockPage(true);
+      } else {
+        drawPet(F_NORMAL);
+        drawIdleHint();
+      }
+    }
+    return;
+  }
+
   if (state == ST_SLEEP) {
     if (ev == SE_LIGHT || ev == SE_PICKUP || ev == SE_SHAKE) wakeUp();
     return;
@@ -326,25 +464,34 @@ void handleSense() {
 }
 
 void setup() {
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, HIGH);
+  pinMode(WIO_BUZZER, OUTPUT);
+  tone(WIO_BUZZER, 1200, 60);
+
   for (int i = 0; i < 8; i++) pinMode(ALL_KEYS[i], INPUT_PULLUP);
+  pinMode(LCD_BACKLIGHT, OUTPUT);
+  digitalWrite(LCD_BACKLIGHT, LOW);  // 先保持背光关闭，彻底杜绝开机白屏！
 
   Serial.begin(115200);
   const uint32_t t0 = millis();
-  while (!Serial && millis() - t0 < 2500) {
+  while (!Serial && millis() - t0 < 1000) {
   }
+  Serial.println("INIT: start");
 
-  if (!display.begin()) {
-    Serial.print("ERR display: ");
-    Serial.println(display.lastResult().message);
-    while (true) delay(1000);
-  }
+  display.begin();
+  Serial.println("INIT: display ok");
+
   wioCjkBegin(display);  // 注入 display(解耦点①),之后 drawTextCJK 全局可用
   randomSeed(analogRead(A0) ^ micros());
   wioMicBegin();
+  Serial.println("INIT: mic ok");
   wioMicConfig(400, PET_TRAILING_MS, 8000);  // 静音阈值 / 截断静音时长 / 没说话超时
   wioSenseBegin();
+  Serial.println("INIT: sense ok");
   wioConfigInit();
   hasActiveConfig = wioConfigLoad(activeConfig);
+  Serial.println("INIT: config ok");
   if (!hasActiveConfig) {
 #if HAS_COMPILED_SECRETS
     memset(&activeConfig, 0, sizeof(activeConfig));
@@ -353,18 +500,29 @@ void setup() {
     strncpy(activeConfig.baiduApiKey, BAIDU_API_KEY, sizeof(activeConfig.baiduApiKey) - 1);
     strncpy(activeConfig.baiduSecret, BAIDU_SECRET_KEY, sizeof(activeConfig.baiduSecret) - 1);
     strncpy(activeConfig.deepseekKey, DEEPSEEK_KEY, sizeof(activeConfig.deepseekKey) - 1);
-    strncpy(activeConfig.city, "深圳", sizeof(activeConfig.city) - 1);
+    strncpy(activeConfig.city, "上海", sizeof(activeConfig.city) - 1);
     hasActiveConfig = true;
     Serial.println("V: using default compiled secrets");
 #endif
+  } else {
+    // 若 Flash 存储的是旧默认值“深圳”或为空，则平滑迁移为“上海”并持久化
+    if (strcmp(activeConfig.city, "深圳") == 0 || strlen(activeConfig.city) == 0) {
+      strncpy(activeConfig.city, "上海", sizeof(activeConfig.city) - 1);
+      wioConfigSave(activeConfig);
+      Serial.println("V: migrated default city to 上海 in Flash");
+    }
   }
   applyActiveConfig();
   Serial.println("HELLO pet 1.3");
   drawPet(F_SLEEP);
+  digitalWrite(LCD_BACKLIGHT, HIGH);  // 首帧就绪后再亮屏，从深黑优雅平滑醒来！
   if (hasActiveConfig && strlen(activeConfig.ssid) > 0) {
     drawTextCJK("小维醒来中…正在连网", 84, 218, 320, TFT_LIGHTGREY, C_BOTTOM_BG);
     petAnimSet(A_WAKE);
     petNetWarmup();
+    if (WiFi.status() == WL_CONNECTED) {
+      syncNetworkTime();
+    }
   } else {
     drawTextCJK("初次见面! 按 A 键配网", 80, 218, 320, TFT_LIGHTGREY, C_BOTTOM_BG);
     petAnimSet(A_WAKE);
@@ -374,14 +532,118 @@ void setup() {
 #endif
   lastInteract = millis();
   enterIdle();
+  Serial.println("!READY");
+}
+
+static int injectedKey = -1;
+
+void petInjectKey(int pin) {
+  injectedKey = pin;
 }
 
 bool pressed(int pin) {
+  if (injectedKey == pin) {
+    injectedKey = -1;
+    return true;
+  }
   static unsigned long lastMs = 0;
   if (digitalRead(pin) != LOW) return false;
   if (millis() - lastMs < 200) return false;
   lastMs = millis();
   return true;
+}
+
+uint32_t petFreeRam() {
+  char top = 't';
+  return (uint32_t)(&top - reinterpret_cast<char*>(sbrk((ptrdiff_t)0)));
+}
+
+void handleTestCommands() {
+  while (Serial.available()) {
+    static String cmdBuf = "";
+    char c = (char)Serial.read();
+    if (c == '\r') continue;
+    if (c == '!' && cmdBuf.length() > 0 && !cmdBuf.startsWith("!")) {
+      cmdBuf = "";  // 丢弃前面由于端口打开产生的脏字符
+    }
+    if (c == '\n') {
+      cmdBuf.trim();
+      if (cmdBuf.length() > 0) {
+        if (cmdBuf == "!PING") {
+          Serial.println("!PONG");
+        } else if (cmdBuf == "!STATUS") {
+          Serial.print("!STATUS state=");
+          Serial.print(petStateStr(state));
+          Serial.print(" anim=");
+          Serial.print(petAnimCurrent());
+          Serial.print(" page=");
+          Serial.print(curPage);
+          Serial.print(" pomo=");
+          Serial.print(pomoRemainingSec);
+          Serial.print(" pomo_run=");
+          Serial.print(pomoRunning ? 1 : 0);
+          Serial.print(" ram=");
+          Serial.print(petFreeRam());
+          Serial.print(" uptime=");
+          Serial.println(millis());
+        } else if (cmdBuf == "!KEY_A" || cmdBuf == "!KEY A") {
+          petInjectKey(PIN_KEY_A);
+          Serial.println("!OK KEY_A");
+        } else if (cmdBuf == "!KEY_B" || cmdBuf == "!KEY B") {
+          petInjectKey(PIN_KEY_B);
+          Serial.println("!OK KEY_B");
+        } else if (cmdBuf == "!KEY_C" || cmdBuf == "!KEY C") {
+          petInjectKey(PIN_KEY_C);
+          Serial.println("!OK KEY_C");
+        } else if (cmdBuf == "!KEY_JOY_L" || cmdBuf == "!KEY_LEFT") {
+          petInjectKey(PIN_JOY_L);
+          Serial.println("!OK KEY_JOY_L");
+        } else if (cmdBuf == "!KEY_JOY_R" || cmdBuf == "!KEY_RIGHT") {
+          petInjectKey(PIN_JOY_R);
+          Serial.println("!OK KEY_JOY_R");
+        } else if (cmdBuf == "!KEY_JOY_PRESS" || cmdBuf == "!KEY_PRESS") {
+          petInjectKey(WIO_5S_PRESS);
+          Serial.println("!OK KEY_JOY_PRESS");
+        } else if (cmdBuf.startsWith("!PAGE ")) {
+          int pg = cmdBuf.substring(6).toInt();
+          switchPage(pg);
+          Serial.print("!OK PAGE ");
+          Serial.println(pg);
+          Serial.flush();
+        } else if (cmdBuf == "!POMO_START") {
+          startPomodoro();
+          Serial.println("!OK POMO_START");
+        } else if (cmdBuf == "!POMO_PAUSE") {
+          pausePomodoro();
+          Serial.println("!OK POMO_PAUSE");
+        } else if (cmdBuf == "!POMO_RESET") {
+          resetPomodoro();
+          Serial.println("!OK POMO_RESET");
+        } else if (cmdBuf == "!CFG_DUMP") {
+          Serial.print("!CFG ssid=");
+          Serial.print(activeConfig.ssid);
+          Serial.print(" city=");
+          Serial.println(activeConfig.city);
+        } else if (cmdBuf == "!CFG_CLEAR") {
+          wioConfigClear();
+          Serial.println("!OK CFG_CLEAR");
+        } else if (cmdBuf.startsWith("!ANIM ")) {
+          int a = cmdBuf.substring(6).toInt();
+          petAnimSet(a);
+          Serial.print("!OK ANIM ");
+          Serial.println(a);
+        } else if (cmdBuf.startsWith("!LOOK ")) {
+          int lk = cmdBuf.substring(6).toInt();
+          drawFeatures(F_NORMAL, lk);
+          Serial.print("!OK LOOK ");
+          Serial.println(lk);
+        }
+      }
+      cmdBuf = "";
+    } else {
+      if (cmdBuf.length() < 64) cmdBuf += c;
+    }
+  }
 }
 
 bool anyKeyDown() {
@@ -392,41 +654,120 @@ bool anyKeyDown() {
 }
 
 void loop() {
+  digitalWrite(LED_BUILTIN, ((millis() / 500) % 2) ? HIGH : LOW);
+  handleTestCommands();
   petAnimTick();
   handleSense();
+  tickPomodoroLogic();
+  if (pomoJustFinished) {
+    pomoJustFinished = false;
+    beep(1568, 150);
+    delay(150);
+    beep(1760, 250);
+    if (state == ST_IDLE && curPage == PAGE_FOCUS) {
+      drawFocusPage(false);
+    }
+  }
+  if (hasSyncedTime && millis() > nextTimeSyncMs) {
+    syncNetworkTime();
+  }
   switch (state) {
     case ST_IDLE: {
       const unsigned long idleFor = millis() - lastInteract;
-      if (idleFor > PET_SLEEP_MS) {
-        enterSleep();
-        break;
+      if (curPage == PAGE_PET && !pomoRunning) {
+        if (idleFor > PET_SLEEP_MS) {
+          enterSleep();
+          break;
+        }
+        if (idleFor > PET_DROWSY_MS && petAnimCurrent() == A_IDLE) petAnimSet(A_DROWSY);
       }
-      if (idleFor > PET_DROWSY_MS && petAnimCurrent() == A_IDLE) petAnimSet(A_DROWSY);
+
+      // 实时看板帧刷新
+      if (curPage == PAGE_CLOCK) {
+        drawClockPage(false);
+      } else if (curPage == PAGE_FOCUS) {
+        drawFocusPage(false);
+      }
+
       if (pressed(PIN_KEY_A)) {  // A 键:进入端侧热点网页配网
         lastInteract = millis();
+        setBacklightPower(true);
         enterConfig();
         break;
       }
-      if (pressed(PIN_KEY_C)) {  // C 键:叫醒犯困的小维
+
+      if (pressed(PIN_KEY_B)) {  // B 键:全局对讲问答
         lastInteract = millis();
-        petAnimSet(A_IDLE);
-        break;
-      }
-      if (pressed(PIN_JOY_L) || pressed(PIN_JOY_R)) {  // 摸头
-        lastInteract = millis();
-        beep(1568, 80);
-        enterShow(F_HAPPY, "", TFT_BLACK, "", 1200);
-        break;
-      }
-      if (pressed(PIN_KEY_B)) {
-        lastInteract = millis();
+        setBacklightPower(true);
+        lastPageBeforeVoice = curPage;
         wioRecStart();
-        state = ST_RECORD;
+        petSetState(ST_RECORD);
         stateStart = millis();
         drawPet(F_LISTEN);
         drawBubbleText("在听…说完我会自己停", TFT_BLACK, "", TFT_BLACK);
         petAnimSet(A_LISTEN);
         beep(988, 60);
+        break;
+      }
+
+      if (pressed(PIN_JOY_R)) {  // 摇杆右: 下一页
+        setBacklightPower(true);
+        switchPage((curPage + 1) % 3);
+        beep(1200, 30);
+        break;
+      }
+      if (pressed(PIN_JOY_L)) {  // 摇杆左: 上一页
+        setBacklightPower(true);
+        switchPage((curPage + 2) % 3);
+        beep(1200, 30);
+        break;
+      }
+
+      if (curPage == PAGE_PET) {
+        if (pressed(PIN_KEY_C)) {  // C 键:叫醒犯困的小维
+          lastInteract = millis();
+          petAnimSet(A_IDLE);
+          break;
+        }
+        if (pressed(WIO_5S_PRESS) || pressed(WIO_5S_UP) || pressed(WIO_5S_DOWN)) {  // 摸头/互动
+          lastInteract = millis();
+          beep(1568, 80);
+          enterShow(F_HAPPY, "", TFT_BLACK, "", 1200);
+          break;
+        }
+      } else if (curPage == PAGE_CLOCK) {
+        if (pressed(WIO_5S_PRESS)) {  // 压下对时
+          lastInteract = millis();
+          beep(1200, 50);
+          drawTextCJK("正在网络对时...", 100, 160, 240, C_TEXT_GOLD, C_BG_CLOCK);
+          if (syncNetworkTime()) {
+            beep(1568, 80);
+          } else {
+            beep(440, 150);
+          }
+          drawClockPage(true);
+          break;
+        }
+      } else if (curPage == PAGE_FOCUS) {
+        if (pressed(WIO_5S_PRESS)) {  // 启停番茄钟
+          lastInteract = millis();
+          if (pomoRunning) {
+            pausePomodoro();
+            beep(600, 80);
+          } else {
+            startPomodoro();
+            beep(1200, 80);
+          }
+          drawFocusPage(true);
+          break;
+        }
+        if (pressed(PIN_KEY_C)) {  // 重置番茄钟
+          lastInteract = millis();
+          resetPomodoro();
+          beep(880, 80);
+          drawFocusPage(true);
+          break;
+        }
       }
       break;
     }
@@ -446,7 +787,7 @@ void loop() {
           Serial.println("V: buffer full (hit 3s limit)");
         }
         beep(880, 50);
-        state = ST_THINK;
+        petSetState(ST_THINK);
         stateStart = millis();
         drawPet(F_THINK);
         drawBubbleText("让我想想…", TFT_BLACK, "", TFT_BLACK);
@@ -465,8 +806,13 @@ void loop() {
       if (ok) {
         beep(1319, 90);
         const int face = (emo >= 0 && emo < 6) ? EMO_FACE[emo] : F_HAPPY;
+        String cleanR = "";
+        for (size_t i = 0; i < r.length(); i++) {
+          char c = r[i];
+          if (c != '*' && c != '#' && c != '`') cleanR += c;
+        }
         enterShow(face, "你:" + t, 0x8410,
-                  r.length() ? "小维:" + r : String("(还没配置 DeepSeek Key,我不会说话呀)"), 15000);
+                  cleanR.length() ? "小维:" + cleanR : String("(还没配置 DeepSeek Key,我不会说话呀)"), 15000);
       } else {
         beep(196, 250);
         if (note == "asr buffer full") {
@@ -496,9 +842,17 @@ void loop() {
     }
 
     case ST_CONFIG: {
+      if (millis() - stateStart > 300 && (pressed(PIN_KEY_B) || pressed(PIN_KEY_C) || pressed(PIN_KEY_A))) {
+        Serial.println("V: exit config by button");
+        beep(880, 80);
+        wioPortalEnd();
+        enterIdle();
+        break;
+      }
       WioConfig newCfg;
       const int st = wioPortalPoll(newCfg);
       if (st == 1) {  // 手机配网已保存
+        Serial.println("V: config saved from web");
         beep(1568, 150);
         activeConfig = newCfg;
         hasActiveConfig = true;
@@ -512,7 +866,8 @@ void loop() {
         enterIdle();
         break;
       }
-      if (st == 2 || pressed(PIN_KEY_B)) {  // 手机网页点击退出 或 B 键退出配网
+      if (st == 2) {  // 手机网页点击退出
+        Serial.println("V: exit config by web");
         beep(880, 80);
         wioPortalEnd();
         enterIdle();

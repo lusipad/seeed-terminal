@@ -17,6 +17,7 @@ int idleStep = 0;
 unsigned long idleActAt = 0;
 
 void petAnimSet(int anim, int face = F_NORMAL) {
+  petFaceResetLook();
   animCur = anim;
   animFace = face;
   animStep = 0;
@@ -32,6 +33,8 @@ void petAnimSet(int anim, int face = F_NORMAL) {
 int petAnimCurrent() { return animCur; }
 
 void endIdleAct(unsigned long now) {
+  petFaceResetLook();
+  clearDeco();
   idleAct = 0;
   idleStep = 0;
   idleActAt = now + random(8000, 20000);
@@ -44,18 +47,19 @@ void tickIdle(unsigned long now) {
     drawFeatures(F_NORMAL);
     animStep = 1;
   }
-  if (idleAct == 1) {  // 张望:左 → 中 → 右 → 中
-    static const int LOOK[4] = {-4, 0, 4, 0};
-    drawEyesOnly(F_NORMAL, LOOK[idleStep]);
+  if (idleAct == 1) {  // 张望:生动顾盼(转睛看侧面 → 正视 → 好奇专注 → 恢复常态)
+    static const int SEQ[4] = {F_THINK, F_NORMAL, F_LISTEN, F_NORMAL};
+    drawFeatures(SEQ[idleStep]);
     if (++idleStep >= 4) endIdleAct(now);
-    else animNext = now + 350;
+    else animNext = now + 400;
     return;
   }
   if (idleAct == 2) {  // 哼歌:开心嘴 + ♪ 从右侧往上飘
     if (idleStep == 0) drawFeatures(F_HAPPY);
     clearDeco();
-    if (idleStep < 4) drawNote(DECO_RX + 10 + 4 * idleStep, DECO_Y + 48 - 10 * idleStep, C_GOLD);
+    if (idleStep < 4) drawNote(DECO_RX + 10 + 4 * idleStep, DECO_Y + 44 - 10 * idleStep, C_GOLD);
     if (++idleStep >= 5) {
+      clearDeco();
       drawFeatures(F_NORMAL);
       endIdleAct(now);
     } else {
@@ -63,9 +67,9 @@ void tickIdle(unsigned long now) {
     }
     return;
   }
-  if (idleAct == 3) {  // 歪头:眼睛偏一侧 + 疑惑嘴,停 1 秒
+  if (idleAct == 3) {  // 歪头:疑惑表情停 1 秒
     if (idleStep == 0) {
-      drawFeatures(F_CONFUSED, 3);
+      drawFeatures(F_CONFUSED);
       idleStep = 1;
       animNext = now + 1000;
       return;
@@ -92,7 +96,12 @@ void tickIdle(unsigned long now) {
   animNext = (idleBlinkAt < idleActAt) ? idleBlinkAt : idleActAt;
 }
 
+extern PetState state;
+extern int curPage;
+
 void petAnimTick() {
+  // 当处于非宠物页面的待机状态时，不画待机小猫动画，以免覆盖时钟或番茄钟看板
+  if (state == ST_IDLE && curPage != PAGE_PET) return;
   const unsigned long now = millis();
   if (animCur == A_NONE || now < animNext) return;
   switch (animCur) {
@@ -105,13 +114,11 @@ void petAnimTick() {
       animStep++;
       animNext = now + 150;
       break;
-    case A_THINK: {  // 眼睛左右看 + 三个点循环
-      static const int LOOK[4] = {0, -4, 0, 4};
+    case A_THINK: {  // 思考:专注看右上方 + 思考气泡点循环
       if (animStep == 0) {
         clearDeco();
         drawFeatures(F_THINK);
       }
-      drawEyesOnly(F_NORMAL, LOOK[animStep % 4]);
       drawThinkDots(animStep % 3 + 1);
       animStep++;
       animNext = now + 300;
@@ -156,12 +163,11 @@ void petAnimTick() {
       animStep++;
       animNext = now + 500;
       break;
-    case A_DIZZY:  // 蚊香眼左右晃
+    case A_DIZZY:  // 眩晕:XX 蚊香眼
       if (animStep == 0) {
         clearDeco();
         drawFeatures(F_DIZZY);
       }
-      drawEyesOnly(F_DIZZY, (animStep % 2) ? 2 : -2);
       animStep++;
       animNext = now + 100;
       break;

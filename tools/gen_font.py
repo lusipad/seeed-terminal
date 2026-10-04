@@ -33,19 +33,16 @@ def blob_index(qu, wei):
 for qu in ZONES:
     for wei in range(1, 95):
         gb = bytes([0xA0 + qu, 0xA0 + wei])
-        pos = blob_index(qu, wei) * 32
+        off = ((gb[0] - 0xA0 - 1) * 94 + (gb[1] - 0xA0 - 1)) * 32
+        # 始终写入真实的 32 字节点阵(包括 ×, ÷, °, · 等 2 字节符号)
+        glyphs.extend(data[off:off + 32])
         try:
             ch = gb.decode("gbk")
             u8 = ch.encode("utf-8")
         except UnicodeDecodeError:
-            glyphs.extend(b"\x00" * 32)
             continue
-        if len(u8) != 3:  # 个别 2 字节 UTF-8 字符会破坏定长索引,剔除
-            glyphs.extend(b"\x00" * 32)
-            continue
-        off = ((gb[0] - 0xA0 - 1) * 94 + (gb[1] - 0xA0 - 1)) * 32
-        entries.append((u8, gb))
-        glyphs.extend(data[off:off + 32])
+        if len(u8) == 3:  # 3 字节 UTF-8 加入定长二分索引
+            entries.append((u8, gb))
 
 entries.sort(key=lambda e: e[0])
 
@@ -70,5 +67,27 @@ with open(OUT_PATH, "w", newline="\n") as f:
         flat.extend(gb)
     for i in range(0, len(flat), 15):
         f.write("  " + ",".join(f"0x{b:02X}" for b in flat[i:i + 15]) + ",\n")
+    f.write("};\n\n")
+
+    # 常用高频拟声与口语二级字 (补充表: 仅需 ~600B Flash)
+    EXTRA_WORDS = ['喵', '咪', '哒', '嗨', '嗷', '噜', '尴', '尬', '唔', '喽', '噢', '呗', '唷', '咚', '嗦', '叽', '嘀', '嗒']
+    extra_entries = []
+    for w in EXTRA_WORDS:
+        gb = w.encode('gb2312')
+        qu = gb[0] - 0xa0
+        wei = gb[1] - 0xa0
+        u8 = w.encode('utf-8')
+        off = ((qu - 1) * 94 + (wei - 1)) * 32
+        glyph = data[off:off+32]
+        extra_entries.append((u8, glyph, w))
+
+    f.write(f"#define HZ16_EXTRA_COUNT {len(extra_entries)}\n")
+    f.write("struct Hz16ExtraGlyph {\n  uint8_t utf8[3];\n  uint8_t glyph[32];\n};\n\n")
+    f.write("const Hz16ExtraGlyph HZ16_EXTRA[HZ16_EXTRA_COUNT] = {\n")
+    for u8, glyph, w in extra_entries:
+        u8_hex = ", ".join(f"0x{b:02X}" for b in u8)
+        glyph_hex = ", ".join(f"0x{b:02X}" for b in glyph)
+        f.write(f"  {{ {{{u8_hex}}}, {{{glyph_hex}}} }}, // {w}\n")
     f.write("};\n")
-print("WioKitFontHz16.h:", len(glyphs) // 32, "glyphs,", len(entries), "entries")
+
+print(f"WioKitFontHz16.h: {len(glyphs) // 32} glyphs, {len(entries)} entries, {len(extra_entries)} extra pet glyphs")

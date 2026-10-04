@@ -6,7 +6,10 @@
 #pragma once
 #include <Arduino.h>
 
-enum SenseEvent { SE_NONE, SE_DARK, SE_LIGHT, SE_SHAKE, SE_PICKUP };
+enum SenseEvent { SE_NONE, SE_DARK, SE_LIGHT, SE_SHAKE, SE_PICKUP, SE_FACEDOWN, SE_FACEUP };
+
+// 查询当前设备是否处于正面朝下平扣状态
+bool wioSenseIsFaceDown();
 
 // 光线读数在麦克风共用 ADC1 时尚不可靠(恒为 ~1):默认不触发睡觉/唤醒,
 // 真机标定确认后改 1 启用。WIO_SENSE_DEBUG=1 时每 2 秒打印光线/加速度/ADC 状态用于标定。

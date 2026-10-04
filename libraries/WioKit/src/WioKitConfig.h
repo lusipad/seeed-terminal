@@ -11,7 +11,7 @@ struct WioConfig {
   char baiduApiKey[65];    // Baidu API Key
   char baiduSecret[65];    // Baidu Secret Key
   char deepseekKey[80];    // DeepSeek Key
-  char city[33];           // 城市名 (如 "深圳")
+  char city[33];           // 城市名 (如 "上海")
   uint32_t crc;
 };
 

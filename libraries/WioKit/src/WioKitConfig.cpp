@@ -1,13 +1,11 @@
 #include "WioKitConfig.h"
 #include <sfud.h>
 #include <rpcWiFi.h>
-#include <DNSServer.h>
 #include <WebServer.h>
 
 static const uint32_t WIO_CONFIG_MAGIC = 0x57494F32;       // "WIO2"
 static const uint32_t WIO_CONFIG_ADDR  = 0x003FF000;       // 4MB Flash 最后一个 4KB 扇区
 
-static DNSServer* pDnsServer = nullptr;
 static WebServer* pWebServer = nullptr;
 static bool portalSaved = false;
 static bool portalExit = false;
@@ -111,8 +109,8 @@ static void handlePortalRoot() {
   html += F("<label>WiFi 密码</label><input type='password' name='pass' placeholder='无密码可留空'>");
 
   html += F("<label>常驻城市 (查天气用)</label><input type='text' name='city' value='");
-  html += (strlen(currentPresetCfg.city) ? currentPresetCfg.city : "深圳");
-  html += F("' placeholder='例如：深圳 / 北京 / 上海'>");
+  html += (strlen(currentPresetCfg.city) ? currentPresetCfg.city : "上海");
+  html += F("' placeholder='例如：上海 / 北京 / 深圳'>");
 
   html += F("<details><summary>🔑 自定义 API Key (可选)</summary>"
             "<label>DeepSeek API Key</label><input type='password' name='ds_key' placeholder='留空保留原配置'>"
@@ -149,7 +147,7 @@ static void handlePortalSave() {
 
   String city = pWebServer->arg("city");
   city.trim();
-  if (!city.length()) city = "深圳";
+  if (!city.length()) city = "上海";
 
   String dsKey = pWebServer->arg("ds_key");
   dsKey.trim();
@@ -201,9 +199,7 @@ static void handlePortalSave() {
 }
 
 static void handlePortalNotFound() {
-  // Captive Portal 强制重定向
-  pWebServer->sendHeader("Location", "http://192.168.4.1/", true);
-  pWebServer->send(302, "text/plain", "");
+  pWebServer->send(404, "text/plain", "Not Found");
 }
 
 bool wioPortalBegin(const char* apSsid, const WioConfig& curCfg) {
@@ -212,7 +208,7 @@ bool wioPortalBegin(const char* apSsid, const WioConfig& curCfg) {
   currentPresetCfg = curCfg;
 
   WiFi.disconnect();
-  delay(100);
+  delay(50);
 
   WiFi.mode(WIFI_AP);
   if (!WiFi.softAP(apSsid)) {
@@ -223,15 +219,10 @@ bool wioPortalBegin(const char* apSsid, const WioConfig& curCfg) {
   Serial.print("V: softAP started, ip=");
   Serial.println(ip);
 
-  pDnsServer = new DNSServer();
-  pDnsServer->start(53, "*", ip);
-
   pWebServer = new WebServer(80);
   pWebServer->on("/", HTTP_GET, handlePortalRoot);
   pWebServer->on("/save", HTTP_POST, handlePortalSave);
   pWebServer->on("/exit", HTTP_GET, handlePortalExit);
-  pWebServer->on("/generate_204", handlePortalRoot);       // Android Captive Portal
-  pWebServer->on("/hotspot-detect.html", handlePortalRoot); // iOS Captive Portal
   pWebServer->onNotFound(handlePortalNotFound);
   pWebServer->begin();
 
@@ -239,7 +230,6 @@ bool wioPortalBegin(const char* apSsid, const WioConfig& curCfg) {
 }
 
 int wioPortalPoll(WioConfig& outCfg) {
-  if (pDnsServer) pDnsServer->processNextRequest();
   if (pWebServer) pWebServer->handleClient();
   if (portalSaved) {
     outCfg = portalResultCfg;
@@ -257,12 +247,8 @@ void wioPortalEnd() {
     delete pWebServer;
     pWebServer = nullptr;
   }
-  if (pDnsServer) {
-    pDnsServer->stop();
-    delete pDnsServer;
-    pDnsServer = nullptr;
-  }
   WiFi.softAPdisconnect(true);
+  delay(50);
   WiFi.mode(WIFI_STA);
   Serial.println("V: softAP stopped, memory released");
 }
