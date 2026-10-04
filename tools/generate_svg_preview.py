@@ -1,640 +1,865 @@
 """
-generate_svg_preview.py - Generates an ultra-detailed, 100% valid XML SVG technical blueprint
-and 3D isometric product preview for the Wio Terminal Retro Tilt TV.
-Strictly calibrated to the exact CAD geometry in cad/stl/jlc_free/ (Head: 31.51cm³, Base: 15.95cm³).
+generate_svg_preview.py - Renders cad/tilt_tv_product_preview.svg straight from the STL meshes.
+
+Nothing in the drawing is hand-typed geometry:
+  * every outline is a projected mesh edge (sharp edges + view silhouettes),
+    split into visible / hidden runs with a z-buffer (hidden-line removal);
+  * every dimension value is measured on the mesh (bounding boxes, plane
+    sections, ray probes) and printed to stdout for cross-checking;
+  * the assembly pose uses the pivot axes measured on head and base.
+
+Usage (from repo root):  python tools/generate_svg_preview.py
 """
 
+import math
 import os
-import xml.etree.ElementTree as ET
-
-def generate_svg():
-    svg_path = "cad/tilt_tv_product_preview.svg"
-    os.makedirs(os.path.dirname(svg_path), exist_ok=True)
-
-    # Canvas dimensions: 1600 x 1060
-    W = 1600
-    H = 1060
-
-    svg = []
-    svg.append(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="100%" height="100%">')
-    
-    # Internal style sheet (clean, safe, valid XML)
-    svg.append("""  <style>
-    .bg { fill: #0a0f1d; }
-    .cad-grid-major { stroke: #1e293b; stroke-width: 1.2; }
-    .cad-grid-minor { stroke: #131c2e; stroke-width: 0.6; }
-    .title-main { fill: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 22px; font-weight: bold; }
-    .title-sub { fill: #94a3b8; font-family: monospace; font-size: 12px; }
-    .badge-pass { fill: #10b981; font-family: monospace; font-size: 11px; font-weight: bold; }
-    .view-title { fill: #38bdf8; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 15px; font-weight: bold; }
-    .view-sub { fill: #64748b; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 11px; }
-    .dim-line { stroke: #38bdf8; stroke-width: 1; }
-    .dim-ext { stroke: #38bdf8; stroke-width: 0.6; stroke-dasharray: 2,2; }
-    .dim-text { fill: #38bdf8; font-family: monospace; font-size: 11px; font-weight: bold; text-anchor: middle; }
-    .center-line { stroke: #ef4444; stroke-width: 0.8; stroke-dasharray: 14,3,3,3; }
-    .part-head { fill: #1e293b; stroke: #e2e8f0; stroke-width: 1.6; }
-    .part-base { fill: #162032; stroke: #cbd5e1; stroke-width: 1.6; }
-    .part-screen { fill: #050b14; stroke: #38bdf8; stroke-width: 1.5; }
-    .part-dial { fill: #d97706; stroke: #fbbf24; stroke-width: 1.2; }
-    .card-bg { fill: #0f172a; stroke: #1e293b; stroke-width: 1.5; }
-    .table-head { fill: #1e293b; }
-    .text-body { fill: #e2e8f0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 11px; }
-    .text-dim { fill: #94a3b8; font-family: monospace; font-size: 10px; }
-    .text-gold { fill: #f59e0b; font-family: monospace; font-size: 11px; font-weight: bold; }
-  </style>""")
-
-    # Defs: Markers, Gradients, Filters
-    svg.append("""  <defs>
-    <!-- Arrow heads -->
-    <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-      <path d="M 0 2 L 10 5 L 0 8 z" fill="#38bdf8"/>
-    </marker>
-    <marker id="arrowRev" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-      <path d="M 10 2 L 0 5 L 10 8 z" fill="#38bdf8"/>
-    </marker>
-    <!-- Grid pattern -->
-    <pattern id="gridMinor" width="20" height="20" patternUnits="userSpaceOnUse">
-      <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#131c2e" stroke-width="0.6"/>
-    </pattern>
-    <pattern id="gridMajor" width="100" height="100" patternUnits="userSpaceOnUse">
-      <path d="M 100 0 L 0 0 0 100" fill="none" stroke="#1e293b" stroke-width="1.2"/>
-    </pattern>
-    <!-- Ambient screen glow -->
-    <radialGradient id="screenGlow" cx="50%" cy="50%" r="65%">
-      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.25"/>
-      <stop offset="60%" stop-color="#0284c7" stop-opacity="0.1"/>
-      <stop offset="100%" stop-color="#050b14" stop-opacity="0.95"/>
-    </radialGradient>
-    <linearGradient id="crtGlass" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.15"/>
-      <stop offset="40%" stop-color="#ffffff" stop-opacity="0.05"/>
-      <stop offset="60%" stop-color="#000000" stop-opacity="0.2"/>
-      <stop offset="100%" stop-color="#000000" stop-opacity="0.6"/>
-    </linearGradient>
-    <linearGradient id="bodyGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#f8fafc"/>
-      <stop offset="40%" stop-color="#e2e8f0"/>
-      <stop offset="100%" stop-color="#94a3b8"/>
-    </linearGradient>
-    <linearGradient id="bodySideGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#cbd5e1"/>
-      <stop offset="100%" stop-color="#64748b"/>
-    </linearGradient>
-    <linearGradient id="baseGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#334155"/>
-      <stop offset="100%" stop-color="#0f172a"/>
-    </linearGradient>
-    <linearGradient id="goldKnob" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#fde68a"/>
-      <stop offset="50%" stop-color="#f59e0b"/>
-      <stop offset="100%" stop-color="#b45309"/>
-    </linearGradient>
-  </defs>""")
-
-    # Background canvas
-    svg.append(f'  <rect width="{W}" height="{H}" class="bg"/>')
-    svg.append(f'  <rect width="{W}" height="{H}" fill="url(#gridMinor)"/>')
-    svg.append(f'  <rect width="{W}" height="{H}" fill="url(#gridMajor)"/>')
-    svg.append(f'  <rect x="20" y="20" width="{W-40}" height="{H-40}" fill="none" stroke="#334155" stroke-width="1.8" rx="6"/>')
-
-    # Top Header
-    svg.append("""  <!-- ==================== HEADER ==================== -->
-  <g transform="translate(48, 54)">
-    <text x="0" y="0" class="title-main">WIO TERMINAL 可俯仰复古小电视监视器 — 产品三维立体效果与 1:1 工程尺寸图</text>
-    <text x="0" y="24" class="title-sub">DWG NO: WT-TILT-TV-2026-REV3  |  CAD ENGINE: MANIFOLD3D CSG  |  SCALE: 2.5:1 (1mm = 2.5px)  |  UNIT: MM</text>
-    <g transform="translate(0, 36)">
-      <rect x="0" y="-12" width="168" height="20" rx="3" fill="#064e3b" stroke="#059669" stroke-width="1"/>
-      <text x="8" y="2" class="badge-pass">✓ 严格 1 壳体 (Single Shell)</text>
-      <rect x="176" y="-12" width="168" height="20" rx="3" fill="#064e3b" stroke="#059669" stroke-width="1"/>
-      <text x="184" y="2" class="badge-pass">✓ 均壁设计 (厚度≤4.08mm)</text>
-      <rect x="352" y="-12" width="176" height="20" rx="3" fill="#064e3b" stroke="#059669" stroke-width="1"/>
-      <text x="360" y="2" class="badge-pass">✓ 总体积 47.46cm³ ≤ 70cm³</text>
-      <rect x="536" y="-12" width="168" height="20" rx="3" fill="#064e3b" stroke="#059669" stroke-width="1"/>
-      <text x="544" y="2" class="badge-pass">✓ 嘉立创免费打样 100% 合规</text>
-    </g>
-  </g>""")
-
-    # =========================================================================
-    # PANEL A: 3D Isometric Product Art Preview (Left: 40..660, Y: 110..600)
-    # =========================================================================
-    svg.append("""  <!-- ==================== PANEL A: 3D ISOMETRIC PRODUCT PREVIEW ==================== -->
-  <g transform="translate(48, 120)">
-    <rect x="0" y="0" width="590" height="480" class="card-bg" rx="6"/>
-    <text x="24" y="32" class="view-title">【A】 成品立体效果与使用形态 (3D ISOMETRIC PRODUCT ART)</text>
-    <text x="24" y="50" class="view-sub">视角：等轴测三维透视 | 象牙白复古外壳 + 复古像素宠物 UI + 俯仰铰链底座</text>
-
-    <!-- Desk plane shadow -->
-    <ellipse cx="295" cy="425" rx="190" ry="26" fill="#000000" opacity="0.6"/>
-
-    <!-- 3D Base Isometric Projection -->
-    <!-- Base Plate Footprint (76 x 72 x 4.2mm) -->
-    <g transform="translate(295, 390)">
-      <!-- Base deck lower edge -->
-      <polygon points="-110,-10 0,35 110,-10 0,-55" fill="#0f172a" stroke="#1e293b" stroke-width="1.5"/>
-      <!-- Base deck 3D thickness (4.2mm -> 11px) -->
-      <polygon points="-110,-10 0,35 0,46 -110,1" fill="#0b1120"/>
-      <polygon points="0,35 110,-10 110,1 0,46" fill="#070c18"/>
-      <!-- 4 Rubber feet -->
-      <ellipse cx="-85" cy="-8" rx="8" ry="4" fill="#334155"/>
-      <ellipse cx="85" cy="-8" rx="8" ry="4" fill="#334155"/>
-      <ellipse cx="0" cy="30" rx="9" ry="4" fill="#334155"/>
-      <ellipse cx="0" cy="-45" rx="8" ry="3" fill="#334155"/>
-
-      <!-- Upright Clevis Left & Right Arms (Gap = 13mm, Arm thickness = 3.7mm, Height = 24mm) -->
-      <!-- Left Arm (with Hex Nut recess) -->
-      <path d="M -30,-8 L -30,-65 A 15 15 0 0 1 -12,-65 L -12,-8 Z" fill="#1e293b" stroke="#475569" stroke-width="1.2"/>
-      <!-- M3 Nut Hexagon Recess -->
-      <polygon points="-24,-65 -22,-69 -18,-69 -16,-65 -18,-61 -22,-61" fill="#0f172a" stroke="#f59e0b" stroke-width="1"/>
-
-      <!-- Right Arm (Behind / foreground) -->
-      <path d="M 12,-8 L 12,-65 A 15 15 0 0 1 30,-65 L 30,-8 Z" fill="#334155" stroke="#64748b" stroke-width="1.2"/>
-      <!-- M3 Screw Head -->
-      <circle cx="21" cy="-65" r="5" fill="#94a3b8" stroke="#cbd5e1" stroke-width="1"/>
-      <line x1="18" y1="-65" x2="24" y2="-65" stroke="#334155" stroke-width="1.2"/>
-    </g>
-
-    <!-- 3D TV Monitor Head (Tilted 20° backward for optimal desktop glance) -->
-    <g transform="translate(295, 260) rotate(-10)">
-      <!-- TV Cabinet Body Shadow & Back Wall -->
-      <!-- Left side extrusion (Depth = 26mm) -->
-      <polygon points="-130,-100 -155,-75 -155,75 -130,50" fill="#94a3b8" stroke="#64748b" stroke-width="1.5"/>
-      <!-- Top side extrusion -->
-      <polygon points="-130,-100 -155,-75 95,-75 120,-100" fill="#e2e8f0" stroke="#cbd5e1" stroke-width="1.5"/>
-
-      <!-- TV Cabinet Front Face (82 x 64mm -> 250 x 160 px, Ivory White Resin) -->
-      <rect x="-130" y="-100" width="250" height="155" rx="14" fill="url(#bodyGradient)" stroke="#f8fafc" stroke-width="2"/>
-
-      <!-- Cat Ears (Left & Right, pointed with inner pink recess) -->
-      <!-- Left Cat Ear -->
-      <polygon points="-90,-100 -50,-100 -70,-145" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
-      <polygon points="-82,-100 -58,-100 -70,-136" fill="#f472b6" opacity="0.6"/>
-      <!-- Right Cat Ear -->
-      <polygon points="40,-100 80,-100 60,-145" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
-      <polygon points="48,-100 72,-100 60,-136" fill="#f472b6" opacity="0.6"/>
-
-      <!-- Screen Bezel Window (50 x 38mm -> 155 x 115 px) -->
-      <rect x="-115" y="-80" width="155" height="115" rx="10" fill="#0f172a" stroke="#334155" stroke-width="2"/>
-      <!-- Inner LCD 2.4" Display Frame -->
-      <rect x="-110" y="-75" width="145" height="105" rx="6" fill="#020617"/>
-      <rect x="-110" y="-75" width="145" height="105" rx="6" fill="url(#screenGlow)"/>
-
-      <!-- CRT Retro Pixel Art GUI Inside Screen -->
-      <!-- Top Status Bar -->
-      <text x="-104" y="-62" fill="#38bdf8" font-family="monospace" font-size="9" font-weight="bold">PET OS 2.0</text>
-      <text x="-25" y="-62" fill="#f59e0b" font-family="monospace" font-size="9">12:45</text>
-      <text x="22" y="-62" fill="#10b981" font-family="monospace" font-size="9">98%⚡</text>
-      <line x1="-105" y1="-57" x2="30" y2="-57" stroke="#1e293b" stroke-width="1"/>
-
-      <!-- Pixel Art Kawaii Cat Character -->
-      <g transform="translate(-40, -25)">
-        <!-- Pixel Cat Body -->
-        <rect x="-18" y="-12" width="36" height="26" fill="#f8fafc" rx="4"/>
-        <!-- Cat Ears -->
-        <polygon points="-16,-12 -8,-12 -12,-20" fill="#f8fafc"/>
-        <polygon points="8,-12 16,-12 12,-20" fill="#f8fafc"/>
-        <!-- Eyes (Happy kawaii blinks ^ ^) -->
-        <path d="M -12,-3 Q -8,-7 -4,-3" fill="none" stroke="#0f172a" stroke-width="2"/>
-        <path d="M 4,-3 Q 8,-7 12,-3" fill="none" stroke="#0f172a" stroke-width="2"/>
-        <!-- Nose & Mouth -->
-        <polygon points="-1,1 1,1 0,3" fill="#f43f5e"/>
-        <path d="M -3,4 Q 0,7 3,4" fill="none" stroke="#0f172a" stroke-width="1.2"/>
-        <!-- Blushing cheeks -->
-        <circle cx="-13" cy="2" r="3" fill="#fb7185" opacity="0.6"/>
-        <circle cx="13" cy="2" r="3" fill="#fb7185" opacity="0.6"/>
-        <!-- Floating Love Heart -->
-        <path d="M 16,-15 A 3 3 0 0 0 10,-15 Q 13,-8 16,-5 Q 19,-8 22,-15 A 3 3 0 0 0 16,-15" fill="#f43f5e"/>
-      </g>
-
-      <!-- Bottom Stats Bars -->
-      <g transform="translate(-104, 18)">
-        <text x="0" y="0" fill="#f43f5e" font-family="monospace" font-size="8">💖 LOVE: [████████░] 92%</text>
-        <text x="0" y="9" fill="#10b981" font-family="monospace" font-size="8">🍖 HUNGER: [███████░░] 78%</text>
-      </g>
-
-      <!-- Glass Reflection Overlay -->
-      <rect x="-110" y="-75" width="145" height="105" rx="6" fill="url(#crtGlass)"/>
-
-      <!-- Right Panel: Dual Retro Dials & 5-Way Joystick -->
-      <!-- Dial 1 (Channel Selector) -->
-      <g transform="translate(70, -60)">
-        <circle cx="0" cy="0" r="14" fill="#0f172a" stroke="#cbd5e1" stroke-width="1.5"/>
-        <circle cx="0" cy="0" r="11" fill="url(#goldKnob)"/>
-        <!-- Pointer line -->
-        <line x1="0" y1="0" x2="8" y2="-6" stroke="#ffffff" stroke-width="2"/>
-        <circle cx="0" cy="0" r="3" fill="#78350f"/>
-        <text x="0" y="21" fill="#475569" font-family="monospace" font-size="7" text-anchor="middle">CH</text>
-      </g>
-
-      <!-- Dial 2 (Volume / Brightness) -->
-      <g transform="translate(70, -18)">
-        <circle cx="0" cy="0" r="14" fill="#0f172a" stroke="#cbd5e1" stroke-width="1.5"/>
-        <circle cx="0" cy="0" r="11" fill="url(#goldKnob)"/>
-        <line x1="0" y1="0" x2="-7" y2="7" stroke="#ffffff" stroke-width="2"/>
-        <circle cx="0" cy="0" r="3" fill="#78350f"/>
-        <text x="0" y="21" fill="#475569" font-family="monospace" font-size="7" text-anchor="middle">VOL</text>
-      </g>
-
-      <!-- 5-Way Analog Joystick Opening & Stick -->
-      <g transform="translate(70, 24)">
-        <circle cx="0" cy="0" r="16" fill="#0f172a" stroke="#334155" stroke-width="1.5"/>
-        <!-- Blue Wio joystick cap -->
-        <circle cx="0" cy="0" r="8" fill="#0284c7" stroke="#38bdf8" stroke-width="1.5"/>
-        <circle cx="0" cy="0" r="3" fill="#e0f2fe"/>
-      </g>
-
-      <!-- Pivot Lug connected to base (Bottom Center) -->
-      <path d="M -15,55 L -15,82 A 12 12 0 0 0 15,82 L 15,55 Z" fill="#cbd5e1" stroke="#94a3b8" stroke-width="1.2"/>
-    </g>
-
-    <!-- Descriptive Annotations -->
-    <path d="M 170,140 L 130,120 L 70,120" fill="none" stroke="#38bdf8" stroke-width="1"/>
-    <text x="65" y="116" fill="#38bdf8" font-size="10" font-family="monospace" text-anchor="end">可爱猫耳装饰 (同轴中空均壁)</text>
-
-    <path d="M 440,200 L 480,180 L 530,180" fill="none" stroke="#38bdf8" stroke-width="1"/>
-    <text x="535" y="184" fill="#38bdf8" font-size="10" font-family="monospace">双复古金属旋钮</text>
-
-    <path d="M 440,290 L 480,290 L 530,290" fill="none" stroke="#38bdf8" stroke-width="1"/>
-    <text x="535" y="294" fill="#38bdf8" font-size="10" font-family="monospace">5向摇杆操控端口</text>
-
-    <path d="M 230,420 L 190,440 L 100,440" fill="none" stroke="#10b981" stroke-width="1"/>
-    <text x="95" y="444" fill="#10b981" font-size="10" font-family="monospace" text-anchor="end">宽基稳固底座 (加深42mm防倾覆)</text>
-  </g>""")
-
-    # =========================================================================
-    # PANEL B: Front Elevation (Right Center: 670..1120, Y: 110..600)
-    # Scale: 2.5:1 (1mm = 2.5px). Head: 82x64mm -> 205x160px.
-    # =========================================================================
-    # Center X = 895, Ground level Y = 500.
-    # Pivot center Z = 24.0mm -> py = 500 - 24*2.5 = 440.0.
-    # Head bottom Z = 30.0mm -> hy_bottom = 500 - 30*2.5 = 425.0.
-    # Head top Z = 94.0mm -> hy_top = 500 - 94*2.5 = 265.0 (height 160px).
-    # Ear tip Z = 103.0mm -> ey_top = 500 - 103*2.5 = 242.5.
-    svg.append("""  <!-- ==================== PANEL B: FRONT ELEVATION BLUEPRINT ==================== -->
-  <g transform="translate(660, 120)">
-    <rect x="0" y="0" width="450" height="480" class="card-bg" rx="6"/>
-    <text x="24" y="32" class="view-title">【B】 主视图 / 正立面 (FRONT ELEVATION)</text>
-    <text x="24" y="50" class="view-sub">标准工程投影 | 比例 2.5:1 | 严格对应 01_jlc_tilt_tv_head.stl</text>
-
-    <!-- Centerline Vertical -->
-    <line x1="225" y1="90" x2="225" y2="440" class="center-line"/>
-
-    <!-- Ground Line -->
-    <line x1="60" y1="410" x2="390" y2="410" stroke="#475569" stroke-width="1.8"/>
-    <text x="400" y="413" fill="#64748b" font-family="monospace" font-size="9">FL (地面)</text>
-
-    <!-- 1. BASE: Width 76.0mm (-38 to +38 -> 190px), Height 4.2mm (10.5px) -->
-    <rect x="130" y="399.5" width="190" height="10.5" class="part-base" rx="1.5"/>
-
-    <!-- 2. BASE CLEVIS ARMS: Left (-10.2 to -6.5), Right (6.5 to 10.2) -->
-    <!-- Pivot Z = 24.0mm -> Y = 410 - 24*2.5 = 350.0. Top radius = 6.5mm (16.25px) -->
-    <!-- Left Arm -->
-    <rect x="199.5" y="350" width="9.25" height="49.5" class="part-base"/>
-    <circle cx="204.125" cy="350" r="16.25" class="part-base"/>
-    <!-- Left Arm M3 Hex Nut Recess (radius 3.4mm -> 8.5px, 6 sides) -->
-    <polygon points="204.125,341.5 211.5,345.75 211.5,354.25 204.125,358.5 196.75,354.25 196.75,345.75"
-             fill="#0a0f1d" stroke="#f59e0b" stroke-width="1.2"/>
-
-    <!-- Right Arm -->
-    <rect x="241.25" y="350" width="9.25" height="49.5" class="part-base"/>
-    <circle cx="245.875" cy="350" r="16.25" class="part-base"/>
-    <!-- Right Arm M3 Screw Head Counterbore (radius 3.3mm -> 8.25px) -->
-    <circle cx="245.875" cy="350" r="8.25" fill="#0a0f1d" stroke="#38bdf8" stroke-width="1.2"/>
-
-    <!-- 3. HEAD PIVOT LUG: Width 12.0mm (X in [-6, 6] -> 30px width: 210 to 240) -->
-    <!-- Lug extends from head bottom Z=30mm down to Z=18mm (Y=410 - 18*2.5 = 365.0) -->
-    <rect x="210" y="335" width="30" height="15" class="part-head"/>
-    <circle cx="225" cy="350" r="15" class="part-head"/>
-    <!-- M3 Through Hole (diameter 3.6mm -> 9px) -->
-    <circle cx="225" cy="350" r="4.5" fill="#0a0f1d" stroke="#38bdf8" stroke-width="1.2"/>
-
-    <!-- Horizontal Pivot Centerline -->
-    <line x1="150" y1="350" x2="300" y2="350" class="center-line"/>
-
-    <!-- 4. HEAD CABINET BODY: Width 82.0mm (-41 to +41 -> 205px: 122.5 to 327.5) -->
-    <!-- Height 64.0mm (Z: 30 to 94mm -> Y: 335 down to 175, height 160px) -->
-    <rect x="122.5" y="175" width="205" height="160" rx="10" class="part-head"/>
-
-    <!-- Screen Viewing Opening: 50.0 x 38.0mm (125 x 95px), X centered at -5.0mm -> -30 to +20mm (X: 150 to 275) -->
-    <!-- Z centered at 32mm in head -> Z=62mm from ground -> Y = 410 - 62*2.5 = 255 (Y: 207.5 to 302.5) -->
-    <rect x="150" y="207.5" width="125" height="95" rx="5" class="part-screen"/>
-    <!-- LCD Active Display Area (48.96 x 36.72mm) -->
-    <rect x="151.3" y="209.1" width="122.4" height="91.8" rx="2" fill="#020617" stroke="#38bdf8" stroke-width="0.8" stroke-dasharray="3,2"/>
-    <text x="212.5" y="258" fill="#38bdf8" font-family="monospace" font-size="10" text-anchor="middle">2.4" LCD (320×240)</text>
-
-    <!-- Dual Retro Knobs: X = +27.0mm -> 225 + 27*2.5 = 292.5 -->
-    <!-- Dial 1: Z in head = 46.0mm -> Z from ground = 30 + 46 = 76mm -> Y = 410 - 76*2.5 = 220.0 -->
-    <circle cx="292.5" cy="220" r="11.25" class="part-dial"/>
-    <circle cx="292.5" cy="220" r="4" fill="#78350f"/>
-    <!-- Dial 2: Z in head = 32.0mm -> Z from ground = 30 + 32 = 62mm -> Y = 410 - 62*2.5 = 255.0 -->
-    <circle cx="292.5" cy="255" r="11.25" class="part-dial"/>
-    <circle cx="292.5" cy="255" r="4" fill="#78350f"/>
-
-    <!-- 5-Way Joystick Port: X = +27.0mm -> 292.5, Z in head = 16.0mm -> Z = 46mm -> Y = 410 - 46*2.5 = 295.0 -->
-    <circle cx="292.5" cy="295" r="16.25" fill="#0a0f1d" stroke="#e2e8f0" stroke-width="1.2"/>
-    <circle cx="292.5" cy="295" r="7.5" fill="#0284c7" stroke="#38bdf8" stroke-width="1"/>
-
-    <!-- Top Button Access Slot: 42.0 x 8.0mm (105 x 20px), centered at X=-5.0mm (150 to 255) -->
-    <rect x="160" y="175" width="105" height="6" fill="#0a0f1d" stroke="#e2e8f0" stroke-width="1"/>
-
-    <!-- Cat Ears: Apex at X = ±20.0mm (175, 275), Height = 11.0mm (27.5px -> Y = 175 - 27.5 + 5 = 152.5) -->
-    <!-- Left Ear -->
-    <polygon points="158.75,175 191.25,175 175,152.5" class="part-head"/>
-    <!-- Right Ear -->
-    <polygon points="258.75,175 291.25,175 275,152.5" class="part-head"/>
-
-    <!-- DIMENSIONS FOR PANEL B -->
-    <!-- Width: 82.0 -->
-    <line x1="122.5" y1="135" x2="327.5" y2="135" class="dim-line" marker-start="url(#arrowRev)" marker-end="url(#arrow)"/>
-    <line x1="122.5" y1="130" x2="122.5" y2="175" class="dim-ext"/>
-    <line x1="327.5" y1="130" x2="327.5" y2="175" class="dim-ext"/>
-    <text x="225" y="130" class="dim-text">82.0 (机身宽度)</text>
-
-    <!-- Screen Width: 50.0 -->
-    <line x1="150" y1="195" x2="275" y2="195" class="dim-line" marker-start="url(#arrowRev)" marker-end="url(#arrow)"/>
-    <text x="212.5" y="190" class="dim-text">50.0</text>
-
-    <!-- Base Width: 76.0 -->
-    <line x1="130" y1="430" x2="320" y2="430" class="dim-line" marker-start="url(#arrowRev)" marker-end="url(#arrow)"/>
-    <line x1="130" y1="410" x2="130" y2="435" class="dim-ext"/>
-    <line x1="320" y1="410" x2="320" y2="435" class="dim-ext"/>
-    <text x="225" y="443" class="dim-text">76.0 (底座宽度)</text>
-
-    <!-- Lug Width: 12.0 & Arms Gap: 13.0 -->
-    <text x="225" y="375" fill="#10b981" font-family="monospace" font-size="9" text-anchor="middle">凸耳宽: 12.0 (双叉间隙 13.0)</text>
-
-    <!-- Height Dimensions: Left Side -->
-    <!-- Total Height = 103.0mm (257.5px) -->
-    <line x1="90" y1="152.5" x2="90" y2="410" class="dim-line" marker-start="url(#arrowRev)" marker-end="url(#arrow)"/>
-    <line x1="175" y1="152.5" x2="85" y2="152.5" class="dim-ext"/>
-    <line x1="130" y1="410" x2="85" y2="410" class="dim-ext"/>
-    <text x="82" y="285" class="dim-text" text-anchor="end">103.0</text>
-
-    <!-- Pivot Height = 24.0mm (60px) -->
-    <line x1="108" y1="350" x2="108" y2="410" class="dim-line" marker-start="url(#arrowRev)" marker-end="url(#arrow)"/>
-    <text x="104" y="385" class="dim-text" text-anchor="end">24.0</text>
-  </g>""")
-
-    # =========================================================================
-    # PANEL C: Side Elevation & Tilt Arc (Far Right: 1130..1560, Y: 110..600)
-    # Pivot is at (1340, 470), Ground level at 530.
-    # Base depth 72.0mm (-30 to +42 -> 180px: 1265 to 1445).
-    # =========================================================================
-    svg.append("""  <!-- ==================== PANEL C: SIDE ELEVATION & TILT TRAJECTORY ==================== -->
-  <g transform="translate(1125, 120)">
-    <rect x="0" y="0" width="425" height="480" class="card-bg" rx="6"/>
-    <text x="24" y="32" class="view-title">【C】 侧面俯仰运动轨迹 (0°~45° TILT MOTION)</text>
-    <text x="24" y="50" class="view-sub">转轴中心高 24.0mm | 后倾最大 45° 自由无级悬停自锁</text>
-
-    <!-- Centerlines at Pivot -->
-    <!-- Pivot X = 205 (corresponds to Y=0 in model), Pivot Y = 350 (Z=24mm) -->
-    <line x1="205" y1="90" x2="205" y2="440" class="center-line"/>
-    <line x1="100" y1="350" x2="350" y2="350" class="center-line"/>
-
-    <!-- Ground Line -->
-    <line x1="40" y1="410" x2="380" y2="410" stroke="#475569" stroke-width="1.8"/>
-
-    <!-- 1. BASE: Depth 72.0mm (Front = -30mm -> -75px, Rear = +42mm -> +105px: X from 130 to 310) -->
-    <rect x="130" y="399.5" width="180" height="10.5" class="part-base" rx="1.5"/>
-
-    <!-- Base Clevis Arm (Width in Y = 13mm -> 32.5px: X from 188.75 to 221.25) -->
-    <rect x="188.75" y="350" width="32.5" height="49.5" class="part-base"/>
-    <circle cx="205" cy="350" r="16.25" class="part-base"/>
-
-    <!-- Position 1: 0° Vertical (Dashed ghost outline) -->
-    <g opacity="0.3">
-      <!-- Head depth 26mm -> 65px (centered at pivot X=205 -> 172.5 to 237.5) -->
-      <!-- Height 64mm -> 160px (Y: 175 to 335) -->
-      <rect x="172.5" y="175" width="65" height="160" rx="6" fill="none" stroke="#e2e8f0" stroke-width="1.4" stroke-dasharray="4,3"/>
-      <polygon points="187.5,175 222.5,175 205,152.5" fill="none" stroke="#e2e8f0" stroke-width="1.2" stroke-dasharray="3,2"/>
-      <text x="162" y="250" fill="#e2e8f0" font-family="monospace" font-size="10">0°</text>
-    </g>
-
-    <!-- Position 3: 45° Max Tilt (Dashed ghost outline) -->
-    <g transform="rotate(45, 205, 350)" opacity="0.3">
-      <rect x="172.5" y="175" width="65" height="160" rx="6" fill="none" stroke="#e2e8f0" stroke-width="1.4" stroke-dasharray="4,3"/>
-      <polygon points="187.5,175 222.5,175 205,152.5" fill="none" stroke="#e2e8f0" stroke-width="1.2" stroke-dasharray="3,2"/>
-      <text x="210" y="240" fill="#e2e8f0" font-family="monospace" font-size="10">45°</text>
-    </g>
-
-    <!-- Position 2: 25° Active Glance Position (Solid Rendered) -->
-    <g transform="rotate(25, 205, 350)">
-      <!-- Lug link to pivot -->
-      <rect x="190" y="335" width="30" height="15" class="part-head"/>
-
-      <!-- Cabinet Body (Depth 26mm -> 65px: 172.5 to 237.5, Height 160px: 175 to 335) -->
-      <rect x="172.5" y="175" width="65" height="160" rx="8" class="part-head"/>
-
-      <!-- Front Screen Glass Active Line (Glowing Cyan) -->
-      <line x1="172.5" y1="209" x2="172.5" y2="301" stroke="#38bdf8" stroke-width="3"/>
-
-      <!-- Protruding Front Knobs (height 2.2mm -> 5.5px) -->
-      <rect x="167" y="210" width="5.5" height="20" class="part-dial"/>
-      <rect x="167" y="245" width="5.5" height="20" class="part-dial"/>
-
-      <!-- Rear Speaker Slits (5 slits on back wall X=237.5) -->
-      <g fill="#475569">
-        <rect x="233" y="225" width="4.5" height="3"/>
-        <rect x="233" y="238" width="4.5" height="3"/>
-        <rect x="233" y="251" width="4.5" height="3"/>
-        <rect x="233" y="264" width="4.5" height="3"/>
-        <rect x="233" y="277" width="4.5" height="3"/>
-      </g>
-
-      <!-- Cat Ear Side Profile -->
-      <polygon points="187.5,175 222.5,175 205,152.5" class="part-head"/>
-    </g>
-
-    <!-- Center Pivot Axle with M3 Bolt Head & Nut -->
-    <circle cx="205" cy="350" r="16.25" fill="#1e293b" stroke="#cbd5e1" stroke-width="1.5"/>
-    <circle cx="205" cy="350" r="4.5" fill="#0a0f1d" stroke="#38bdf8" stroke-width="1.2"/>
-
-    <!-- TILT SWEEP ARC (0° to 45°) -->
-    <path d="M 205 195 A 155 155 0 0 1 314.6 240.4"
-          fill="none" stroke="#f59e0b" stroke-width="1.8" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
-    <text x="290" y="215" fill="#f59e0b" font-family="monospace" font-size="11" font-weight="bold">0° ~ 45° 自由俯仰</text>
-
-    <!-- DIMENSIONS FOR PANEL C -->
-    <!-- Base Depth = 72.0mm -->
-    <line x1="130" y1="430" x2="310" y2="430" class="dim-line" marker-start="url(#arrowRev)" marker-end="url(#arrow)"/>
-    <line x1="130" y1="410" x2="130" y2="435" class="dim-ext"/>
-    <line x1="310" y1="410" x2="310" y2="435" class="dim-ext"/>
-    <text x="220" y="443" class="dim-text">72.0 (前30 / 后42)</text>
-
-    <!-- Head Thickness = 26.0mm -->
-    <text x="150" y="190" class="dim-text" text-anchor="end">厚度: 26.0</text>
-
-    <!-- Anti-Tip Stability Note Badge -->
-    <rect x="20" y="448" width="385" height="24" rx="3" fill="#064e3b" stroke="#059669" stroke-width="1"/>
-    <text x="212.5" y="464" class="badge-pass" text-anchor="middle">✓ 后脚跟延伸 42mm | 45°极限仰角下后倾安全余量 &gt; 14.8mm 绝不倒伏</text>
-  </g>""")
-
-    # =========================================================================
-    # PANEL D: Top Plan View (Bottom-Left: 48..640, Y: 620..1020)
-    # =========================================================================
-    svg.append("""  <!-- ==================== PANEL D: TOP PLAN VIEW ==================== -->
-  <g transform="translate(48, 620)">
-    <rect x="0" y="0" width="590" height="400" class="card-bg" rx="6"/>
-    <text x="24" y="32" class="view-title">【D】 俯视平面图与内部构造 (TOP PLAN VIEW)</text>
-    <text x="24" y="50" class="view-sub">顶视基准 | 尺寸 76×72mm 底座 + 82×26mm 机身 | 顶部按键孔与防滑垫</text>
-
-    <!-- Centerlines -->
-    <line x1="295" y1="80" x2="295" y2="350" class="center-line"/>
-    <line x1="120" y1="210" x2="470" y2="210" class="center-line"/>
-
-    <!-- 1. BASE OUTLINE: 76 x 72mm (190 x 180px: X from 200 to 390, Y from 120 to 300) -->
-    <!-- X: 295 - 38*2.5 = 200 to 295 + 38*2.5 = 390 -->
-    <!-- Y: 210 - 30*2.5 = 135 (front) to 210 + 42*2.5 = 315 (rear) -->
-    <rect x="200" y="135" width="190" height="180" class="part-base" rx="4"/>
-
-    <!-- 4 Non-slip Rubber Feet Indentations (8x8mm -> 20x20px at 4 corners) -->
-    <rect x="210" y="145" width="20" height="20" fill="#0a0f1d" stroke="#475569" stroke-width="1"/>
-    <rect x="360" y="145" width="20" height="20" fill="#0a0f1d" stroke="#475569" stroke-width="1"/>
-    <rect x="210" y="285" width="20" height="20" fill="#0a0f1d" stroke="#475569" stroke-width="1"/>
-    <rect x="360" y="285" width="20" height="20" fill="#0a0f1d" stroke="#475569" stroke-width="1"/>
-    <text x="220" y="159" fill="#64748b" font-family="monospace" font-size="8" text-anchor="middle">垫</text>
-    <text x="370" y="159" fill="#64748b" font-family="monospace" font-size="8" text-anchor="middle">垫</text>
-    <text x="220" y="299" fill="#64748b" font-family="monospace" font-size="8" text-anchor="middle">垫</text>
-    <text x="370" y="299" fill="#64748b" font-family="monospace" font-size="8" text-anchor="middle">垫</text>
-
-    <!-- 2. TV CABINET TOP PROFILE: 82.0 x 26.0mm (205 x 65px: X 192.5 to 397.5, Y 177.5 to 242.5) -->
-    <rect x="192.5" y="177.5" width="205" height="65" rx="8" class="part-head"/>
-
-    <!-- Internal Cavity Space Outline (77.6 x 21.6mm dashed, showing uniform 2.2mm wall) -->
-    <rect x="198" y="183" width="194" height="54" rx="4" fill="none" stroke="#38bdf8" stroke-width="0.8" stroke-dasharray="3,2"/>
-    <text x="295" y="170" fill="#38bdf8" font-family="monospace" font-size="9" text-anchor="middle">四周围壁均匀壁厚 2.2mm (抽壳减重无厚壁)</text>
-
-    <!-- Top 3-Button Slot: 42.0 x 8.0mm (105 x 20px, centered at X=-5.0mm -> 230 to 335) -->
-    <rect x="230" y="188" width="105" height="20" rx="3" fill="#0a0f1d" stroke="#38bdf8" stroke-width="1.2"/>
-    <text x="282.5" y="202" fill="#38bdf8" font-family="monospace" font-size="9" font-weight="bold" text-anchor="middle">A / B / C 硬件按键开口</text>
-
-    <!-- Cat Ears Footprint (Two circles of radius 6.5mm -> 16.25px at X=±20mm) -->
-    <circle cx="245" cy="210" r="16.25" fill="#f59e0b" fill-opacity="0.3" stroke="#f59e0b" stroke-width="1.2"/>
-    <circle cx="345" cy="210" r="16.25" fill="#f59e0b" fill-opacity="0.3" stroke="#f59e0b" stroke-width="1.2"/>
-    <circle cx="245" cy="210" r="10.75" fill="none" stroke="#f59e0b" stroke-width="0.8" stroke-dasharray="2,2"/>
-    <circle cx="345" cy="210" r="10.75" fill="none" stroke="#f59e0b" stroke-width="0.8" stroke-dasharray="2,2"/>
-
-    <!-- Left Side Type-C Cable Slot Callout -->
-    <path d="M 192.5,210 L 150,210 L 120,240" fill="none" stroke="#38bdf8" stroke-width="1"/>
-    <text x="115" y="244" fill="#38bdf8" font-family="monospace" font-size="9" text-anchor="end">左侧 Type-C 供电/烧录口</text>
-
-    <!-- Dimensions for Panel D -->
-    <line x1="200" y1="115" x2="390" y2="115" class="dim-line" marker-start="url(#arrowRev)" marker-end="url(#arrow)"/>
-    <text x="295" y="110" class="dim-text">76.0 (底座宽度)</text>
-
-    <line x1="415" y1="135" x2="415" y2="315" class="dim-line" marker-start="url(#arrowRev)" marker-end="url(#arrow)"/>
-    <text x="425" y="228" class="dim-text" text-anchor="start">72.0 深度</text>
-
-    <text x="295" y="340" fill="#94a3b8" font-family="monospace" font-size="10" text-anchor="middle">Wio Terminal 容纳腔: 73.0 × 13.0 × 58.0 mm</text>
-    <text x="295" y="356" fill="#10b981" font-family="monospace" font-size="10" text-anchor="middle">后腔空间: 70.0 × 9.6 × 54.0 mm (容纳 8Ω喇叭 + 600mAh锂电)</text>
-  </g>""")
-
-    # =========================================================================
-    # PANEL E: BOM, Hardware & JLC Free Certified (Bottom-Right: 660..1560, Y: 620..1020)
-    # =========================================================================
-    svg.append("""  <!-- ==================== PANEL E: BOM & JLC FREE VERIFICATION ==================== -->
-  <g transform="translate(660, 620)">
-    <rect x="0" y="0" width="890" height="400" class="card-bg" rx="6"/>
-    <text x="24" y="32" class="view-title">【E】 装配清单 BOM 与嘉立创 0 元免费打样合格验证</text>
-    <text x="24" y="50" class="view-sub">完全符合《嘉立创3D打印设计规范》 | 顺丰包邮 0 元领券抵扣认证</text>
-
-    <!-- Table Container -->
-    <g transform="translate(24, 70)">
-      <!-- Table Header -->
-      <rect x="0" y="0" width="842" height="28" fill="#1e293b" rx="3"/>
-      <text x="12" y="18" fill="#38bdf8" font-family="monospace" font-size="11" font-weight="bold"># 序号</text>
-      <text x="65" y="18" fill="#38bdf8" font-family="monospace" font-size="11" font-weight="bold">零件 / 物料名称</text>
-      <text x="260" y="18" fill="#38bdf8" font-family="monospace" font-size="11" font-weight="bold">文件 / 规格型号</text>
-      <text x="470" y="18" fill="#38bdf8" font-family="monospace" font-size="11" font-weight="bold">尺寸与体积 (cm³)</text>
-      <text x="640" y="18" fill="#38bdf8" font-family="monospace" font-size="11" font-weight="bold">重量 / 材质</text>
-      <text x="755" y="18" fill="#38bdf8" font-family="monospace" font-size="11" font-weight="bold">合规状态</text>
-
-      <!-- Row 1: Head STL -->
-      <g transform="translate(0, 36)">
-        <text x="12" y="16" class="text-gold">[01]</text>
-        <text x="65" y="16" class="text-body" font-weight="bold">可俯仰复古小电视机头</text>
-        <text x="260" y="16" fill="#38bdf8" font-family="monospace" font-size="11">01_jlc_tilt_tv_head.stl</text>
-        <text x="470" y="16" class="text-dim">82.0×28.2×85.0mm (31.51 cm³)</text>
-        <text x="640" y="16" class="text-body">36.2g / X光敏树脂</text>
-        <text x="755" y="16" class="badge-pass">PASS (1壳体)</text>
-      </g>
-      <line x1="0" y1="62" x2="842" y2="62" stroke="#1e293b" stroke-width="1"/>
-
-      <!-- Row 2: Base STL -->
-      <g transform="translate(0, 72)">
-        <text x="12" y="16" class="text-gold">[02]</text>
-        <text x="65" y="16" class="text-body" font-weight="bold">双叉加强型铰链底座</text>
-        <text x="260" y="16" fill="#38bdf8" font-family="monospace" font-size="11">02_jlc_tilt_tv_base.stl</text>
-        <text x="470" y="16" class="text-dim">76.0×72.0×30.5mm (15.95 cm³)</text>
-        <text x="640" y="16" class="text-body">18.3g / X光敏树脂</text>
-        <text x="755" y="16" class="badge-pass">PASS (1壳体)</text>
-      </g>
-      <line x1="0" y1="98" x2="842" y2="98" stroke="#1e293b" stroke-width="1"/>
-
-      <!-- Row 3: Hardware Bolt -->
-      <g transform="translate(0, 108)">
-        <text x="12" y="16" class="text-gold">[03]</text>
-        <text x="65" y="16" class="text-body" font-weight="bold">标准转轴装配五金</text>
-        <text x="260" y="16" class="text-body">M3 × 25mm 螺栓 1根 + M3 螺母 1个</text>
-        <text x="470" y="16" class="text-dim">底座自带M3六角螺母锁槽</text>
-        <text x="640" y="16" class="text-body">304不锈钢 / 外购件</text>
-        <text x="755" y="16" fill="#38bdf8" font-family="monospace" font-size="11">免扳手自锁</text>
-      </g>
-      <line x1="0" y1="134" x2="842" y2="134" stroke="#1e293b" stroke-width="1"/>
-
-      <!-- Row 4: Wio Terminal & Speaker -->
-      <g transform="translate(0, 144)">
-        <text x="12" y="16" class="text-gold">[04]</text>
-        <text x="65" y="16" class="text-body" font-weight="bold">核心终端与发声单元</text>
-        <text x="260" y="16" class="text-body">Seeed Wio Terminal + 8Ω 2W 扬声器</text>
-        <text x="470" y="16" class="text-dim">72×57×12mm + Φ28×4.5mm</text>
-        <text x="640" y="16" class="text-body">机身预置出音孔/背腔</text>
-        <text x="755" y="16" fill="#10b981" font-family="monospace" font-size="11">精准卡位</text>
-      </g>
-      <line x1="0" y1="170" x2="842" y2="170" stroke="#1e293b" stroke-width="1"/>
-    </g>
-
-    <!-- JLC Free Coupon Audit Card -->
-    <g transform="translate(24, 260)">
-      <rect x="0" y="0" width="842" height="115" rx="4" fill="#0b1329" stroke="#1e293b" stroke-width="1.2"/>
-      <text x="16" y="24" fill="#38bdf8" font-family="monospace" font-size="12" font-weight="bold">嘉立创 3D 打印免费打样（X树脂券）合规指标综合核查表：</text>
-      
-      <g transform="translate(16, 42)">
-        <text x="0" y="14" class="text-dim">1. 订单款数限制：</text>
-        <text x="120" y="14" class="text-body">款1 (机头) + 款2 (底座) = 刚好 2 款（符合每单≤2款限制）</text>
-        <text x="540" y="14" class="badge-pass">✅ 合规通过 (PASS)</text>
-
-        <text x="0" y="32" class="text-dim">2. 总体积限制：</text>
-        <text x="120" y="32" class="text-body">31.51 cm³ + 15.95 cm³ = <tspan fill="#38bdf8" font-weight="bold">47.46 cm³</tspan>（上限 70.00 cm³，余量 22.54 cm³）</text>
-        <text x="540" y="32" class="badge-pass">✅ 合规通过 (仅占67%)</text>
-
-        <text x="0" y="50" class="text-dim">3. 几何外形包围盒：</text>
-        <text x="120" y="50" class="text-body">机头 82.0×28.2×85.0mm | 底座 76.0×72.0×30.5mm（全部远小于 100mm 限制）</text>
-        <text x="540" y="50" class="badge-pass">✅ 合规通过 (PASS)</text>
-
-        <text x="0" y="68" class="text-dim">4. DFM 拓扑与厚壁：</text>
-        <text x="120" y="68" class="text-body">每文件严格 1 壳体 (mesh.split=1)，最大厚度 4.08mm，彻底根除厚壁与多壳体驳回</text>
-        <text x="540" y="50" fill="#10b981" font-family="monospace" font-size="12" font-weight="bold">顺丰 0 元包邮</text>
-      </g>
-    </g>
-  </g>""")
-
-    # Close SVG
-    svg.append('</svg>')
-
-    full_svg_text = "\n".join(svg)
-
-    # Validate with ElementTree
-    try:
-        ET.fromstring(full_svg_text)
-        print("XML Validation: 100% VALID XML (ElementTree verified)")
-    except Exception as e:
-        print(f"XML Validation FAILED: {e}")
-        raise e
-
-    with open(svg_path, 'w', encoding='utf-8') as f:
-        f.write(full_svg_text)
-
-    print(f"Successfully generated and saved: {svg_path} ({len(full_svg_text)} bytes)")
+from functools import reduce
+
+import numpy as np
+import trimesh
+from shapely.geometry import Polygon
+from shapely.ops import polygonize, unary_union
+
+STL_DIR = 'cad/stl'
+OUT = 'cad/tilt_tv_product_preview.svg'
+
+ZBUF_RES = 0.08        # mm per z-buffer pixel
+SHARP_DEG = 20.0       # dihedral angle above which an edge is drawn (cylinder facets are 11.25 deg)
+DENSITY = 1.15         # g/cm3, 9600 resin
+
+# ------------------------------------------------------------------------------
+# Views: (right, up, toward-viewer); right x up == toward-viewer
+# ------------------------------------------------------------------------------
+VIEWS = {
+    'front':  ((1, 0, 0), (0, 0, 1), (0, -1, 0)),   # looking at the screen (+Y)
+    'rear':   ((-1, 0, 0), (0, 0, 1), (0, 1, 0)),
+    'right':  ((0, 1, 0), (0, 0, 1), (1, 0, 0)),    # from +X, front of TV on the left
+    'left':   ((0, -1, 0), (0, 0, 1), (-1, 0, 0)),
+    'top':    ((1, 0, 0), (0, 1, 0), (0, 0, 1)),    # front of TV at the bottom
+    'bottom': ((1, 0, 0), (0, -1, 0), (0, 0, -1)),
+}
+
+
+def iso_view(az_deg, el_deg):
+    """Camera on a sphere: az measured from -Y (front) toward +X, el above horizon."""
+    a, e = math.radians(az_deg), math.radians(el_deg)
+    w = np.array([math.sin(a) * math.cos(e), -math.cos(a) * math.cos(e), math.sin(e)])
+    u = np.cross([0, 0, 1], w)
+    u /= np.linalg.norm(u)
+    v = np.cross(w, u)
+    return tuple(u), tuple(v), tuple(w)
+
+
+# ------------------------------------------------------------------------------
+# Projection / hidden-line engine
+# ------------------------------------------------------------------------------
+class Projection:
+    """Orthographic projection of one or more meshes with a z-buffer."""
+
+    def __init__(self, meshes, view, res=ZBUF_RES, bounds=None):
+        self.meshes = meshes
+        self.res = res
+        self.R = np.array(view, dtype=float)          # rows: u, v, w
+        self.w = self.R[2]
+        if bounds is None:
+            pts = np.vstack([m.vertices @ self.R.T for m in meshes])
+            bounds = (pts[:, :2].min(0) - 1.0, pts[:, :2].max(0) + 1.0)
+        self.lo, self.hi = np.asarray(bounds[0], float), np.asarray(bounds[1], float)
+        n = np.ceil((self.hi - self.lo) / res).astype(int) + 1
+        self.zbuf = np.full((n[1], n[0]), -np.inf)
+        self.fbuf = np.full((n[1], n[0]), -1, dtype=np.int64)   # (mesh_idx << 32) | face
+        for mi, m in enumerate(meshes):
+            self._raster(m, mi)
+
+    def _raster(self, mesh, mi):
+        P = mesh.vertices @ self.R.T
+        tri = P[mesh.faces]
+        for fi, t in enumerate(tri):
+            px = (t[:, :2] - self.lo) / self.res
+            x0, y0 = np.maximum(np.floor(px.min(0)).astype(int), 0)
+            x1, y1 = np.minimum(np.ceil(px.max(0)).astype(int), np.array(self.zbuf.shape[::-1]) - 1)
+            if x0 > x1 or y0 > y1:
+                continue
+            (ax, ay), (bx, by), (cx, cy) = px
+            den = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy)
+            if abs(den) < 1e-9:
+                continue
+            gx, gy = np.meshgrid(np.arange(x0, x1 + 1) + 0.5, np.arange(y0, y1 + 1) + 0.5)
+            l1 = ((by - cy) * (gx - cx) + (cx - bx) * (gy - cy)) / den
+            l2 = ((cy - ay) * (gx - cx) + (ax - cx) * (gy - cy)) / den
+            l3 = 1 - l1 - l2
+            inside = (l1 >= -1e-6) & (l2 >= -1e-6) & (l3 >= -1e-6)
+            if not inside.any():
+                continue
+            d = l1 * t[0, 2] + l2 * t[1, 2] + l3 * t[2, 2]
+            sub = self.zbuf[y0:y1 + 1, x0:x1 + 1]
+            fsub = self.fbuf[y0:y1 + 1, x0:x1 + 1]
+            upd = inside & (d > sub)
+            sub[upd] = d[upd]
+            fsub[upd] = (mi << 32) | fi
+
+    def _visible(self, p2, d):
+        ix = ((p2[:, 0] - self.lo[0]) / self.res).astype(int)
+        iy = ((p2[:, 1] - self.lo[1]) / self.res).astype(int)
+        h, w = self.zbuf.shape
+        best = np.full(len(d), np.inf)
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                yy = np.clip(iy + dy, 0, h - 1)
+                xx = np.clip(ix + dx, 0, w - 1)
+                best = np.minimum(best, self.zbuf[yy, xx])
+        return d >= best - 0.06
+
+    def edges(self, mi):
+        """Return (visible, hidden) lists of 2D polylines for mesh mi."""
+        m = self.meshes[mi]
+        n = m.face_normals @ self.w
+        fa = m.face_adjacency
+        sharp = m.face_adjacency_angles > math.radians(SHARP_DEG)
+        front = n > 1e-6
+        silhouette = front[fa[:, 0]] != front[fa[:, 1]]
+        sel = sharp | silhouette
+        P = m.vertices @ self.R.T
+        vis, hid = [], []
+        for a, b in m.face_adjacency_edges[sel]:
+            pa, pb = P[a], P[b]
+            L = np.linalg.norm(pb[:2] - pa[:2])
+            if L < 0.02:
+                continue
+            k = max(2, int(L / 0.12) + 1)
+            t = np.linspace(0, 1, k)
+            s = pa[None] * (1 - t[:, None]) + pb[None] * t[:, None]
+            flag = self._visible(s[:, :2], s[:, 2])
+            if k >= 3:  # drop single-sample flicker
+                f = flag.astype(int)
+                f[1:-1] = (f[:-2] + f[1:-1] + f[2:]) >= 2
+                flag = f.astype(bool)
+            start = 0
+            for i in range(1, k + 1):
+                if i == k or flag[i] != flag[start]:
+                    seg = (s[start, :2], s[min(i, k - 1), :2] if i < k else s[k - 1, :2])
+                    if i < k:
+                        seg = (s[start, :2], s[i, :2])
+                    (vis if flag[start] else hid).append(seg)
+                    start = i
+        return vis, hid
+
+    def silhouette(self, mi):
+        m = self.meshes[mi]
+        P = (m.vertices @ self.R.T)[:, :2]
+        polys = [Polygon(P[f]) for f in m.faces]
+        polys = [p for p in polys if p.area > 1e-6]
+        return unary_union(polys).buffer(0.01).buffer(-0.01)
+
+    def shaded(self, light=(-0.35, -0.55, 0.75)):
+        """Visible triangles (per z-buffer ownership), far-to-near, with a Lambert factor."""
+        owned = np.unique(self.fbuf[self.fbuf >= 0])
+        L = np.array(light, float)
+        L /= np.linalg.norm(L)
+        out = []
+        for key in owned:
+            mi, fi = int(key >> 32), int(key & 0xffffffff)
+            m = self.meshes[mi]
+            P = m.vertices[m.faces[fi]] @ self.R.T
+            nrm = m.face_normals[fi]
+            lam = 0.42 + 0.58 * max(0.0, float(nrm @ L))
+            out.append((P[:, 2].mean(), mi, P[:, :2], lam))
+        out.sort(key=lambda r: r[0])
+        return out
+
+
+# ------------------------------------------------------------------------------
+# Measurement helpers (all dimensions come from here)
+# ------------------------------------------------------------------------------
+def section(mesh, origin, normal, u, v):
+    """Planar cross-section as a shapely geometry in (u, v) coordinates (even-odd fill)."""
+    segs = trimesh.intersections.mesh_plane(mesh, normal, origin)
+    u, v = np.array(u, float), np.array(v, float)
+    lines = [((float(a @ u), float(a @ v)), (float(b @ u), float(b @ v))) for a, b in segs]
+    lines = [tuple((round(x, 5), round(y, 5)) for x, y in l) for l in lines]
+    faces = [Polygon(f.exterior) for f in polygonize(lines)]
+    if not faces:
+        return Polygon()
+    return reduce(lambda g, f: g.symmetric_difference(f), faces)
+
+
+def holes(geom):
+    """Interior rings (holes) of a section, as shapely Polygons sorted by area desc."""
+    geoms = getattr(geom, 'geoms', [geom])
+    hs = [Polygon(r) for g in geoms for r in g.interiors]
+    return sorted(hs, key=lambda p: -p.area)
+
+
+def parts(geom):
+    return sorted(getattr(geom, 'geoms', [geom]), key=lambda p: -p.area)
+
+
+def ray_hits(mesh, origin, direction):
+    loc, _, _ = mesh.ray.intersects_location([origin], [direction])
+    d = np.array(direction, float)
+    t = sorted(float((p - origin) @ d) for p in loc)
+    out = []
+    for x in t:  # merge duplicates from shared triangle edges
+        if not out or abs(x - out[-1]) > 1e-4:
+            out.append(x)
+    return out
+
+
+def bbox2(p):
+    x0, y0, x1, y1 = p.bounds
+    return x0, y0, x1, y1, x1 - x0, y1 - y0, (x0 + x1) / 2, (y0 + y1) / 2
+
+
+def measure(head, base, knob):
+    M = {}
+    for name, m in (('head', head), ('base', base), ('knob', knob)):
+        M[name] = dict(lo=m.bounds[0], hi=m.bounds[1], ext=m.extents,
+                       vol=m.volume / 1000.0, area=m.area / 100.0,
+                       shells=len(m.split(only_watertight=False)), watertight=m.is_watertight,
+                       faces=len(m.faces))
+    H = M['head']
+    hz0 = H['lo'][2]
+
+    # Head: front silhouette holes = see-through openings (screen window, joystick)
+    front = Projection([head], VIEWS['front']).silhouette(0)
+    hs = holes(front)
+    H['screen'] = bbox2(hs[0])
+    H['joy'] = bbox2(hs[1])
+    # Front bezel lip: probe just behind the front face
+    xs = ray_hits(head, np.array([-200.0, 1.5, 32.0]), [1, 0, 0])
+    H['bez_x'] = (xs[0] - 200.0, xs[-1] - 200.0)
+    zs = ray_hits(head, np.array([-20.0, 1.5, -50.0]), [0, 0, 1])
+    H['bez_z'] = (zs[0] - 50.0, zs[-1] - 50.0)
+    # Cabinet body behind the bezel: probe at mid depth
+    xs = ray_hits(head, np.array([-200.0, 13.0, 56.0]), [1, 0, 0])
+    H['cab_x'] = (xs[0] - 200.0, xs[-1] - 200.0)
+    H['side_wall'] = xs[1] - xs[0]
+    ys = ray_hits(head, np.array([0.0, -50.0, 56.0]), [0, 1, 0])
+    H['cab_y'] = (ys[0] - 50.0, None)
+    H['front_wall'] = ys[1] - ys[0]
+    zs = ray_hits(head, np.array([-20.0, 22.0, -50.0]), [0, 0, 1])
+    H['cab_z'] = (zs[0] - 50.0, zs[-1] - 50.0)
+    H['bottom_wall'] = zs[1] - zs[0]
+    H['top_wall'] = zs[-1] - zs[-2]
+    # Rear opening (slide-in pocket): section just inside the back face
+    rear_y = H['hi'][1] - 0.3
+    rear = section(head, [0, rear_y, 0], [0, 1, 0], (1, 0, 0), (0, 0, 1))
+    H['pocket'] = bbox2(holes(rear)[0])
+    H['cab_y'] = (H['cab_y'][0], H['hi'][1])
+    # Pocket front stop (Wio rests against the inside of the front wall)
+    ys2 = ray_hits(head, np.array([0.0, 200.0, 56.0]), [0, -1, 0])
+    H['pocket_front_y'] = 200.0 - ys2[0]
+    H['pocket_depth'] = H['hi'][1] - H['pocket_front_y']
+    # Dials: section through the bosses in front of the face
+    dials = parts(section(head, [0, -0.5, 0], [0, 1, 0], (1, 0, 0), (0, 0, 1)))
+    H['dials'] = sorted([bbox2(d) for d in dials], key=lambda b: -b[7])
+    H['dial_proud'] = -H['lo'][1]
+    # Top button slot: ray probes through the roof along x=0
+    zr = H['cab_z'][1] - 1.0
+    ys3 = ray_hits(head, np.array([0.0, -50.0, zr]), [0, 1, 0])
+    xs3 = ray_hits(head, np.array([-200.0, (ys3[1] + ys3[2]) / 2 - 50.0, zr]), [1, 0, 0])
+    sy0, sy1 = ys3[1] - 50.0, ys3[2] - 50.0
+    sx0, sx1 = xs3[1] - 200.0, xs3[2] - 200.0
+    H['btn_slot'] = (sx0, sy0, sx1, sy1, sx1 - sx0, sy1 - sy0, (sx0 + sx1) / 2, (sy0 + sy1) / 2)
+    # Antenna: ball tips from a slice through the ball equators (top - ball radius)
+    ball_r = None
+    for dz in np.arange(0.6, 4.0, 0.1):          # widest slice = ball equator
+        sl = parts(section(head, [0, 0, H['hi'][2] - dz], [0, 0, 1], (1, 0, 0), (0, 1, 0)))
+        if len(sl) == 2 and (ball_r is None or bbox2(sl[0])[4] / 2 > ball_r + 1e-3):
+            ball_r = bbox2(sl[0])[4] / 2
+            tips = sl
+    H['ant'] = sorted([bbox2(e) for e in tips], key=lambda b: b[6])
+    H['ant_ball_d'] = 2 * ball_r
+    H['ant_top'] = H['hi'][2]
+    H['ant_span'] = H['ant'][1][6] - H['ant'][0][6]
+    # Web between the screen window and the joystick hole (thinnest front-face bridge)
+    H['web'] = H['joy'][0] - H['screen'][2]
+    # Type-C: section through the left wall
+    lw = H['cab_x'][0] + H['side_wall'] / 2
+    tc = section(head, [lw, 0, 0], [1, 0, 0], (0, 1, 0), (0, 0, 1))
+    H['typec'] = bbox2(holes(tc)[0]) if holes(tc) else bbox2(
+        sorted(parts(tc), key=lambda p: p.bounds[1])[0])
+    # Pivot lug: section on the centre plane x=0 below the cabinet
+    lug = section(head, [0, 0, 0], [1, 0, 0], (0, 1, 0), (0, 0, 1))
+    lug_h = [bbox2(h) for h in holes(lug) if h.bounds[3] < H['cab_z'][0] + 0.01]
+    piv = min(lug_h, key=lambda b: b[4])
+    H['pivot'] = (0.0, piv[6], piv[7])
+    H['pivot_d'] = piv[4]
+    xs = ray_hits(head, np.array([-200.0, piv[6], hz0 + 0.8]), [1, 0, 0])
+    H['lug_w'] = xs[-1] - xs[0]
+    yz = section(head, [0, 0, hz0 + 0.8], [0, 0, 1], (1, 0, 0), (0, 1, 0))
+    H['lug_r'] = H['pivot'][2] - hz0
+
+    B = M['base']
+    ys = ray_hits(base, np.array([0.0, -200.0, 1.0]), [0, 1, 0])
+    xs_plate = ray_hits(base, np.array([-200.0, 30.0, 3.5]), [1, 0, 0])
+    B['plate_x'] = (xs_plate[0] - 200.0, xs_plate[-1] - 200.0)
+    zs = ray_hits(base, np.array([-25.0, 25.0, 50.0]), [0, 0, -1])
+    B['plate_top'] = 50.0 - zs[0]
+    B['deck'] = zs[1] - zs[0]
+    zr = ray_hits(base, np.array([0.0, 25.0, 50.0]), [0, 0, -1])
+    B['rib_full'] = zr[-1] - zr[0]
+    # Arms: probe across X at mid arm height
+    zm = (B['plate_top'] + B['hi'][2]) / 2 - 3
+    xa = ray_hits(base, np.array([-200.0, 0.0, zm]), [1, 0, 0])
+    xa = [x - 200.0 for x in xa]
+    B['arm_l'] = (xa[0], xa[1])
+    B['arm_r'] = (xa[-2], xa[-1])
+    B['gap'] = xa[2] - xa[1] if len(xa) == 4 else None
+    ya = ray_hits(base, np.array([-8.35, -200.0, zm]), [0, 1, 0])
+    B['arm_y'] = (ya[0] - 200.0, ya[-1] - 200.0)
+    # Pivot hole: section through the right arm
+    rs = section(base, [(B['arm_r'][0] + B['arm_r'][1]) / 2, 0, 0], [1, 0, 0], (0, 1, 0), (0, 0, 1))
+    ph = bbox2(holes(rs)[0])
+    B['pivot'] = (0.0, ph[6], ph[7])
+    B['pivot_d'] = ph[4]
+    B['arm_r_round'] = B['hi'][2] - ph[7]
+    # Nut trap / counterbore: sections in the outer skins
+    nl = section(base, [B['arm_l'][0] + 0.3, 0, 0], [1, 0, 0], (0, 1, 0), (0, 0, 1))
+    B['hex'] = bbox2(holes(nl)[0])
+    B['hex_depth'] = ray_hits(base, np.array([-200.0, ph[6] + 2.4, ph[7]]), [1, 0, 0])[0] - 200.0 - B['arm_l'][0]
+    cr = section(base, [B['arm_r'][1] - 0.3, 0, 0], [1, 0, 0], (0, 1, 0), (0, 0, 1))
+    B['cbore_d'] = bbox2(holes(cr)[0])[4]
+    cb = ray_hits(base, np.array([200.0, ph[6] + 2.5, ph[7]]), [-1, 0, 0])
+    B['cbore_depth'] = B['arm_r'][1] - (200.0 - cb[0])
+    # Underside: pocket, ribs, foot recesses
+    und = section(base, [0, 0, 0.5], [0, 0, 1], (1, 0, 0), (0, 1, 0))
+    hs = holes(und)
+    B['feet'] = sorted([bbox2(h) for h in hs if h.area < 100], key=lambda b: (b[7], b[6]))
+    B['pockets'] = [bbox2(h) for h in hs if h.area >= 100]
+    pk = unary_union([h for h in hs if h.area >= 100])
+    B['pocket_env'] = bbox2(pk.envelope)
+    pxs = sorted(B['pockets'], key=lambda b: b[0])
+    B['rib_w'] = pxs[-1][0] - pxs[0][2]
+    # Foot pads: only count recesses that actually exist in the mesh (they may fall inside the pocket)
+    B['foot_depth'] = None
+    if B['feet']:
+        fz = ray_hits(base, np.array([B['feet'][0][6], B['feet'][0][7], -10.0]), [0, 0, 1])
+        B['foot_depth'] = fz[0] - 10.0
+    # Contact area with the desk (z = 0 face)
+    B['contact'] = und.area
+
+    K = M['knob']
+    ks = section(knob, [0, 0, 0.3], [0, 0, 1], (1, 0, 0), (0, 1, 0))
+    K['hex'] = bbox2(holes(ks)[0])
+    km = section(knob, [0, 0, 5.0], [0, 0, 1], (1, 0, 0), (0, 1, 0))
+    K['bore'] = bbox2(holes(km)[0])[4]
+    kz = ray_hits(knob, np.array([0.0, 6.0, 50.0]), [0, 0, -1])
+    K['collar_h'] = K['hi'][2] - (50.0 - kz[0]) if kz else None
+    K['body_h'] = 50.0 - kz[0]
+    kc = section(knob, [0, 0, K['hi'][2] - 0.3], [0, 0, 1], (1, 0, 0), (0, 1, 0))
+    K['collar_d'] = bbox2(parts(kc)[0])[4]
+    K['ridges'] = 12
+    hd = ray_hits(knob, np.array([0.0, 2.6, -10.0]), [0, 0, 1])
+    K['hex_depth'] = hd[0] - 10.0
+    return M
+
+
+def head_pose(M, tilt_deg):
+    """4x4 transform taking head coordinates to the assembled pose (pivot on pivot, tilted back)."""
+    hp, bp = np.array(M['head']['pivot']), np.array(M['base']['pivot'])
+    return trimesh.transformations.rotation_matrix(math.radians(-tilt_deg), [1, 0, 0], bp) @         trimesh.transformations.translation_matrix(bp - hp)
+
+
+def assemble(head, base, knob, M, tilt_deg):
+    """Head pivot onto base pivot, tilted back by tilt_deg; knob on the -X arm face."""
+    bp = np.array(M['base']['pivot'])
+    h = head.copy()
+    h.apply_transform(head_pose(M, tilt_deg))
+    k = knob.copy()
+    k.apply_transform(trimesh.transformations.rotation_matrix(math.radians(-90), [0, 1, 0]))  # +Z -> -X
+    k.apply_translation([M['base']['arm_l'][0], bp[1], bp[2]])
+    return h, base.copy(), k
+
+
+# ------------------------------------------------------------------------------
+# SVG helpers
+# ------------------------------------------------------------------------------
+INK = '#e2e8f0'
+HID = '#64748b'
+DIM = '#38bdf8'
+CEN = '#f87171'
+ACC = '#f59e0b'
+OK = '#34d399'
+BAD = '#f43f5e'
+FILL = {'head': '#1e293b', 'base': '#172235', 'knob': '#3b2a12'}
+SHADE = {'head': (236, 230, 216), 'base': (88, 96, 110), 'knob': (200, 150, 80)}
+
+
+def f1(x):
+    return f'{x:.1f}'
+
+
+class Canvas:
+    def __init__(self):
+        self.out = []
+
+    def add(self, s):
+        self.out.append(s)
+
+    def text(self, x, y, s, size=11, fill=INK, anchor='start', weight='normal', cls=None, rot=None):
+        tr = f' transform="rotate({rot} {x:.1f} {y:.1f})"' if rot else ''
+        self.add(f'<text x="{x:.1f}" y="{y:.1f}" font-size="{size}" fill="{fill}" '
+                 f'text-anchor="{anchor}" font-weight="{weight}"{tr}>{s}</text>')
+
+
+class ViewFrame:
+    """Places a Projection on the canvas: mm (u, v) -> px with a given origin and scale."""
+
+    def __init__(self, cv, proj, ox, oy, scale):
+        self.cv, self.p, self.ox, self.oy, self.s = cv, proj, ox, oy, scale
+
+    def xy(self, u, v):
+        return self.ox + u * self.s, self.oy - v * self.s
+
+    def pt3(self, p):
+        q = np.asarray(p, float) @ self.p.R.T
+        return q[0], q[1]
+
+    def path(self, segs):
+        d = []
+        for a, b in segs:
+            x0, y0 = self.xy(*a)
+            x1, y1 = self.xy(*b)
+            d.append(f'M{x0:.1f} {y0:.1f}L{x1:.1f} {y1:.1f}')
+        return ''.join(d)
+
+    def poly_path(self, geom):
+        d = []
+        for g in getattr(geom, 'geoms', [geom]):
+            if g.is_empty:
+                continue
+            for ring in [g.exterior] + list(g.interiors):
+                c = list(ring.coords)
+                d.append('M' + 'L'.join(f'{self.xy(*p)[0]:.1f} {self.xy(*p)[1]:.1f}' for p in c) + 'Z')
+        return ''.join(d)
+
+    def draw(self, kinds, fill=True, hidden=True, width=1.3):
+        for mi, kind in enumerate(kinds):
+            if fill:
+                self.cv.add(f'<path d="{self.poly_path(self.p.silhouette(mi))}" fill="{FILL[kind]}" '
+                            f'fill-rule="evenodd" stroke="none"/>')
+        for mi, kind in enumerate(kinds):
+            vis, hid = self.p.edges(mi)
+            if hidden and hid:
+                self.cv.add(f'<path d="{self.path(hid)}" stroke="{HID}" stroke-width="0.7" '
+                            f'stroke-dasharray="3 2" fill="none"/>')
+            self.cv.add(f'<path d="{self.path(vis)}" stroke="{INK}" stroke-width="{width}" '
+                        f'stroke-linecap="round" fill="none"/>')
+
+    def draw_shaded(self, kinds, edge_w=0.9):
+        self.cv.add('<g stroke-width="0.35" stroke-linejoin="round">')
+        for _, mi, P, lam in self.p.shaded():
+            r, g, b = (int(c * lam) for c in SHADE[kinds[mi]])
+            pts = ' '.join(f'{self.xy(*q)[0]:.1f},{self.xy(*q)[1]:.1f}' for q in P)
+            col = f'#{r:02x}{g:02x}{b:02x}'
+            self.cv.add(f'<polygon points="{pts}" fill="{col}" stroke="{col}"/>')
+        self.cv.add('</g>')
+        for mi in range(len(kinds)):
+            vis, _ = self.p.edges(mi)
+            self.cv.add(f'<path d="{self.path(vis)}" stroke="#0b1220" stroke-opacity="0.55" '
+                        f'stroke-width="{edge_w}" fill="none"/>')
+
+    # --- annotation primitives (all inputs in mm, view coordinates) ---
+    def hdim(self, u0, u1, v, v_ref0=None, v_ref1=None, label=None, below=False):
+        x0, y = self.xy(u0, v)
+        x1, _ = self.xy(u1, v)
+        for u, vr in ((u0, v_ref0), (u1, v_ref1)):
+            if vr is not None:
+                xe, ye = self.xy(u, vr)
+                self.cv.add(f'<line x1="{xe:.1f}" y1="{ye:.1f}" x2="{xe:.1f}" y2="{y + (4 if ye < y else -4):.1f}" '
+                            f'stroke="{DIM}" stroke-width="0.5" stroke-dasharray="2 2"/>')
+        self.cv.add(f'<line x1="{x0:.1f}" y1="{y:.1f}" x2="{x1:.1f}" y2="{y:.1f}" stroke="{DIM}" '
+                    f'stroke-width="0.9" marker-start="url(#ar)" marker-end="url(#ar)"/>')
+        ty = y + 13 if below else y - 4
+        self.cv.text((x0 + x1) / 2, ty, label or f1(abs(u1 - u0)), 10.5, DIM, 'middle', 'bold')
+
+    def vdim(self, v0, v1, u, u_ref0=None, u_ref1=None, label=None, left=True):
+        x, y0 = self.xy(u, v0)
+        _, y1 = self.xy(u, v1)
+        for v, ur in ((v0, u_ref0), (v1, u_ref1)):
+            if ur is not None:
+                xe, ye = self.xy(ur, v)
+                self.cv.add(f'<line x1="{xe:.1f}" y1="{ye:.1f}" x2="{x + (4 if xe > x else -4):.1f}" y2="{ye:.1f}" '
+                            f'stroke="{DIM}" stroke-width="0.5" stroke-dasharray="2 2"/>')
+        self.cv.add(f'<line x1="{x:.1f}" y1="{y0:.1f}" x2="{x:.1f}" y2="{y1:.1f}" stroke="{DIM}" '
+                    f'stroke-width="0.9" marker-start="url(#ar)" marker-end="url(#ar)"/>')
+        tx = x - 5 if left else x + 13
+        self.cv.text(tx, (y0 + y1) / 2, label or f1(abs(v1 - v0)), 10.5, DIM, 'middle', 'bold', rot=-90)
+
+    def center(self, u, v, r):
+        x, y = self.xy(u, v)
+        rr = r * self.s
+        self.cv.add(f'<path d="M{x - rr:.1f} {y:.1f}H{x + rr:.1f}M{x:.1f} {y - rr:.1f}V{y + rr:.1f}" '
+                    f'stroke="{CEN}" stroke-width="0.6" stroke-dasharray="8 2 2 2"/>')
+
+    def cline(self, u0, v0, u1, v1):
+        x0, y0 = self.xy(u0, v0)
+        x1, y1 = self.xy(u1, v1)
+        self.cv.add(f'<line x1="{x0:.1f}" y1="{y0:.1f}" x2="{x1:.1f}" y2="{y1:.1f}" stroke="{CEN}" '
+                    f'stroke-width="0.6" stroke-dasharray="10 2 2 2"/>')
+
+    def note(self, u, v, tx, ty, s, color=ACC, anchor='start'):
+        x, y = self.xy(u, v)
+        self.cv.add(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="1.8" fill="{color}"/>')
+        self.cv.add(f'<polyline points="{x:.1f},{y:.1f} {tx:.1f},{ty:.1f} '
+                    f'{tx + (40 if anchor == "start" else -40):.1f},{ty:.1f}" fill="none" '
+                    f'stroke="{color}" stroke-width="0.7"/>')
+        self.cv.text(tx + (3 if anchor == 'start' else -3), ty - 3, s, 10, color, anchor)
+
+
+def panel(cv, x, y, w, h, tag, title, sub):
+    cv.add(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="6" fill="#0d1526" stroke="#1f2a3e"/>')
+    cv.text(x + 14, y + 24, f'{tag}  {title}', 14, '#7dd3fc', weight='bold')
+    cv.text(x + 14, y + 41, sub, 10.5, '#64748b')
+
+
+def view_label(cv, x, y, s):
+    cv.text(x, y, s, 10.5, '#94a3b8', 'middle', 'bold')
+
+
+# ------------------------------------------------------------------------------
+# Drawing
+# ------------------------------------------------------------------------------
+def build():
+    head = trimesh.load(f'{STL_DIR}/wio_tilt_tv_head.stl')
+    base = trimesh.load(f'{STL_DIR}/wio_tilt_tv_base.stl')
+    knob = trimesh.load(f'{STL_DIR}/wio_tilt_tv_knob.stl')
+    M = measure(head, base, knob)
+    H, B, K = M['head'], M['base'], M['knob']
+
+    # Assembly checks
+    tilt_samples = [0, 15, 30, 45]
+    clash = {}
+    for t in tilt_samples:
+        h, b, _ = assemble(head, base, knob, M, t)
+        inter = trimesh.boolean.intersection([h, b], engine='manifold')
+        clash[t] = (inter.volume if len(inter.faces) else 0.0, inter)
+    bp = np.array(B['pivot'])
+    pivot_to_cab = H['pivot'][2] - H['cab_z'][0] if False else H['cab_z'][0] - H['pivot'][2]
+    clash_mm = B['arm_r_round'] - pivot_to_cab
+
+    W, HH = 1800, 1320
+    cv = Canvas()
+    cv.add(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {HH}" width="{W}" height="{HH}" '
+           f'font-family="Consolas, \'Microsoft YaHei\', \'PingFang SC\', monospace">')
+    cv.add('<defs><marker id="ar" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" '
+           'orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M0 1.5L10 5L0 8.5z" fill="#38bdf8"/></marker>'
+           '<pattern id="g" width="20" height="20" patternUnits="userSpaceOnUse">'
+           '<path d="M20 0H0V20" fill="none" stroke="#111a2b" stroke-width="0.6"/></pattern></defs>')
+    cv.add(f'<rect width="{W}" height="{HH}" fill="#0a0f1d"/><rect width="{W}" height="{HH}" fill="url(#g)"/>')
+
+    # Title block
+    cv.text(28, 40, 'WIO TERMINAL 可俯仰复古小电视 — STL 实测三视图 / 装配图', 22, '#f8fafc', weight='bold')
+    cv.text(28, 62, f'DWG WT-TILT-TV REV4  |  单位 mm  |  各视图观察方向见图名  |  所有轮廓 = STL 网格边投影 + z-buffer 消隐'
+                    f'（实线可见 / 虚线隐藏）  |  所有尺寸 = 网格截面/射线实测', 11.5, '#94a3b8')
+    cv.text(28, 80, 'source: cad/stl/wio_tilt_tv_head.stl · wio_tilt_tv_base.stl · wio_tilt_tv_knob.stl  '
+                    '— regenerate: python tools/generate_svg_preview.py', 11, '#475569')
+
+    # ==========================================================================
+    # [A] HEAD  (front / right / top / rear)  scale 2.6
+    # ==========================================================================
+    S = 2.6
+    panel(cv, 20, 96, 1060, 640, '[A]', f'机头 wio_tilt_tv_head.stl',
+          f'外形 {f1(H["ext"][0])} × {f1(H["ext"][1])} × {f1(H["ext"][2])}  |  体积 {H["vol"]:.2f} cm³  |  '
+          f'≈{H["vol"] * DENSITY:.1f} g  |  比例 {S}:1 px/mm')
+
+    # Front view
+    pf = Projection([head], VIEWS['front'])
+    vf = ViewFrame(cv, pf, 190, 0, S)
+    vf.ox = 70 + (-H['lo'][0]) * S + 40
+    vf.oy = 210 + H['hi'][2] * S
+    vf.draw(['head'])
+    sw = H['screen']
+    vf.center(sw[6], sw[7], sw[4] / 2 + 3)
+    jy = H['joy']
+    vf.center(jy[6], jy[7], jy[4] / 2 + 3)
+    for d in H['dials']:
+        vf.center(d[6], d[7], d[4] / 2 + 2)
+    cx0, cx1 = H['bez_x']
+    cz0, cz1 = H['bez_z']
+    vf.hdim(cx0, cx1, H['lo'][2] - 9, cz0, cz0, label=f'{f1(cx1 - cx0)}', below=True)
+    vf.hdim(sw[0], sw[2], sw[3] + 4, sw[3], sw[3], label=f'窗 {f1(sw[4])}')
+    vf.vdim(sw[1], sw[3], sw[0] - 4, sw[0], sw[0], label=f1(sw[5]), left=True)
+    vf.vdim(cz0, cz1, cx0 - 9, cx0, cx0, label=f1(cz1 - cz0))
+    vf.vdim(H['lo'][2], H['hi'][2], cx0 - 21, 0, H['ant'][0][6], label=f'总高 {f1(H["ext"][2])}')
+    vf.vdim(cz0, sw[1], sw[0] + 6, None, None, label=f1(sw[1] - cz0), left=False)
+    e0, e1 = H['ant']
+    vf.hdim(e0[6], e1[6], H['hi'][2] + 6, H['hi'][2], H['hi'][2], label=f'天线展开 {f1(H["ant_span"])}')
+    vf.hdim(-H['lug_w'] / 2, H['lug_w'] / 2, H['lo'][2] - 3, None, None, label=f'凸耳 {f1(H["lug_w"])}', below=True)
+    vf.note(jy[6] + jy[4] / 2 * 0.7, jy[7] - jy[4] / 2 * 0.7, vf.xy(cx1, 0)[0] + 18, vf.xy(0, jy[7] - 9)[1],
+            f'摇杆孔 Ø{f1(jy[4])}')
+    d0 = H['dials'][0]
+    vf.note(d0[6] + d0[4] / 2 * 0.7, d0[7] + d0[4] / 2 * 0.7, vf.xy(cx1, 0)[0] + 18, vf.xy(0, d0[7] + 9)[1],
+            f'旋钮凸台 Ø{f1(d0[4])} ×2')
+    vf.note(sw[6], sw[7], vf.xy(sw[6], 0)[0] - 30, vf.xy(0, sw[7] + 4)[1], '通透（后部开口）', HID)
+    view_label(cv, vf.xy(0, 0)[0], vf.xy(0, H['lo'][2])[1] + 56, '主视图 FRONT')
+
+    # Right view (to the right of the front view in 1st-angle = viewed from left; we label explicitly)
+    pr = Projection([head], VIEWS['right'])
+    vr = ViewFrame(cv, pr, 0, vf.oy, S)
+    vr.ox = 470 - H['lo'][1] * S
+    vr.draw(['head'])
+    py, pz = H['pivot'][1], H['pivot'][2]
+    vr.center(py, pz, H['lug_r'] + 3)
+    vr.hdim(H['lo'][1], H['hi'][1], H['lo'][2] - 9, cz0, cz0, label=f'{f1(H["ext"][1])}', below=True)
+    vr.vdim(H['lo'][2], cz0, H['hi'][1] + 8, None, None, label=f1(cz0 - H['lo'][2]), left=False)
+    vr.vdim(pz, cz0, H['hi'][1] + 20, py, None, label=f1(cz0 - pz), left=False)
+    vr.note(py + 1.3, pz - 1.3, vr.xy(H['hi'][1], 0)[0] + 34, vr.xy(0, pz - 9)[1],
+            f'转轴孔 Ø{f1(H["pivot_d"])} / R{f1(H["lug_r"])}')
+    vr.note(H['pocket_front_y'], 40, vr.xy(H['hi'][1], 0)[0] + 34, vr.xy(0, 44)[1],
+            f'前挡壁 {f1(H["front_wall"])}（虚线=内腔）', HID)
+    view_label(cv, vr.xy(13, 0)[0], vr.xy(0, H['lo'][2])[1] + 56, '右视图 RIGHT (+X)')
+
+    # Rear view
+    pb = Projection([head], VIEWS['rear'])
+    vb = ViewFrame(cv, pb, 0, vf.oy, S)
+    vb.ox = 830 + H['hi'][0] * S * 0
+    vb.draw(['head'])
+    pk = H['pocket']
+    # rear view u = -x
+    vb.hdim(-pk[2], -pk[0], pk[3] - 6, None, None, label=f'插口 {f1(pk[4])}')
+    vb.vdim(pk[1], pk[3], -pk[2] - 4, -pk[2], -pk[2], label=f1(pk[5]))
+    vb.vdim(cz0, pk[1], -pk[0] + 6, None, None, label=f1(pk[1] - cz0), left=False)
+    vb.hdim(-cx1, -pk[2], pk[1] - 5, None, None, label=f1(H['side_wall']), below=True)
+    tcx = H['typec']
+    vb.note(-H['cab_x'][0], tcx[7], vb.xy(-H['cab_x'][0], 0)[0] + 22, vb.xy(0, tcx[7] + 13)[1],
+            f'Type-C {f1(tcx[4])}×{f1(tcx[5])}')
+    view_label(cv, vb.xy(0, 0)[0], vb.xy(0, H['lo'][2])[1] + 56, '后视图 REAR（Wio 从后插入）')
+
+    # Top view under the front view
+    pt = Projection([head], VIEWS['top'])
+    vt = ViewFrame(cv, pt, vf.ox, 0, S)
+    vt.oy = 545 + H['hi'][1] * S
+    vt.draw(['head'])
+    bs = H['btn_slot']
+    vt.hdim(bs[0], bs[2], H['lo'][1] - 5, bs[1], bs[1], label=f'按键槽 {f1(bs[4])}', below=True)
+    vt.vdim(bs[1], bs[3], bs[2] + 4, bs[2], bs[2], label=f1(bs[5]), left=False)
+    vt.vdim(0, H['hi'][1], cx1 + 8, cx1, cx1, label=f1(H['hi'][1]), left=False)
+    for e in H['ant']:
+        vt.center(e[6], e[7], e[4] / 2 + 2)
+    vt.note(H['ant'][1][6] + 1.5, H['ant'][1][7] + 1.5, vt.xy(cx1, 0)[0] + 72, vt.xy(0, 10)[1],
+            f'天线球头 Ø{f1(H["ant_ball_d"])} → 顶 Z{f1(H["ant_top"])}')
+    vt.vdim(H['lo'][1], 0, cx0 - 6, None, cx0, label=f1(-H['lo'][1]))
+    view_label(cv, vt.xy(0, 0)[0], vt.xy(0, H['lo'][1])[1] + 48, '俯视图 TOP')
+
+    # Head feature table
+    tx, ty = 560, 560
+    rows = [
+        ('前框 / 机身', f'{f1(cx1 - cx0)} × {f1(cz1 - cz0)} / {f1(H["cab_x"][1] - H["cab_x"][0])} × '
+                      f'{f1(H["cab_z"][1] - H["cab_z"][0])}，深 {f1(H["hi"][1])}'),
+        ('屏幕视窗', f'{f1(sw[4])} × {f1(sw[5])}，中心 X{sw[6]:+.1f} Z{f1(sw[7])}'),
+        ('后插口 (Wio 72×57)', f'{f1(pk[4])} × {f1(pk[5])}，深 {f1(H["hi"][1] - H["pocket_front_y"])}'),
+        ('壁厚 前/侧/顶/底', f'{f1(H["front_wall"])} / {f1(H["side_wall"])} / {f1(H["top_wall"])} / {f1(H["bottom_wall"])}'),
+        ('摇杆孔 / 旋钮凸台', f'Ø{f1(jy[4])} / Ø{f1(d0[4])} ×2 (含指针凸出 {f1(H["dial_proud"])})'),
+        ('天线', f'展开 {f1(H["ant_span"])}，球头 Ø{f1(H["ant_ball_d"])}，顶 Z{f1(H["ant_top"])}'),
+        ('转轴', f'Ø{f1(H["pivot_d"])} @ Y{f1(H["pivot"][1])} Z{f1(H["pivot"][2])}，凸耳宽 {f1(H["lug_w"])}'),
+    ]
+    cv.text(tx, ty, '机头实测特征', 12, '#7dd3fc', weight='bold')
+    for i, (k, v) in enumerate(rows):
+        cv.text(tx, ty + 22 + i * 19, k, 11, '#94a3b8')
+        cv.text(tx + 150, ty + 22 + i * 19, v, 11, INK)
+
+    # ==========================================================================
+    # [B] BASE + KNOB
+    # ==========================================================================
+    S2 = 2.6
+    panel(cv, 20, 748, 1060, 556, '[B]', '底座 wio_tilt_tv_base.stl  +  旋钮 wio_tilt_tv_knob.stl',
+          f'底座 {f1(B["ext"][0])} × {f1(B["ext"][1])} × {f1(B["ext"][2])}，{B["vol"]:.2f} cm³ ≈{B["vol"] * DENSITY:.1f} g  |  '
+          f'旋钮 Ø{f1(K["ext"][0])} × {f1(K["ext"][2])}，{K["vol"]:.2f} cm³  |  比例 {S2}:1')
+
+    pbf = Projection([base], VIEWS['front'])
+    vbf = ViewFrame(cv, pbf, 70 - B['lo'][0] * S2 + 20, 840 + B['hi'][2] * S2 + 20, S2)
+    vbf.draw(['base'])
+    vbf.center(0, B['pivot'][2], 9)
+    vbf.hdim(B['lo'][0], B['hi'][0], -7, 0, 0, label=f1(B['ext'][0]), below=True)
+    vbf.vdim(0, B['hi'][2], B['lo'][0] - 6, B['lo'][0], B['arm_l'][0], label=f1(B['ext'][2]))
+    vbf.vdim(0, B['pivot'][2], B['lo'][0] + 8, None, -1, label=f'轴高 {f1(B["pivot"][2])}', left=False)
+    vbf.hdim(B['arm_l'][1], B['arm_r'][0], B['hi'][2] + 5, B['hi'][2] - 2, B['hi'][2] - 2,
+             label=f'{f1(B["gap"])}')
+    vbf.hdim(B['arm_l'][0], B['arm_r'][1], B['hi'][2] + 14, B['hi'][2], B['hi'][2],
+             label=f'{f1(B["arm_r"][1] - B["arm_l"][0])}')
+    vbf.vdim(0, B['plate_top'], B['hi'][0] + 6, B['hi'][0], B['hi'][0], label=f1(B['plate_top']), left=False)
+    vbf.note(B['arm_r'][1], B['pivot'][2] + 4, vbf.xy(B['hi'][0], 0)[0] - 10, vbf.xy(0, B['hi'][2] + 3)[1],
+             f'臂厚 {f1(B["arm_r"][1] - B["arm_r"][0])}')
+    view_label(cv, vbf.xy(0, 0)[0], vbf.xy(0, 0)[1] + 50, '主视图 FRONT')
+
+    pbs = Projection([base], VIEWS['right'])
+    vbs = ViewFrame(cv, pbs, 0, vbf.oy, S2)
+    vbs.ox = 330 - B['lo'][1] * S2 + 30
+    vbs.draw(['base'])
+    vbs.center(B['pivot'][1], B['pivot'][2], B['arm_r_round'] + 3)
+    vbs.hdim(B['lo'][1], B['hi'][1], -7, 0, 0, label=f1(B['ext'][1]), below=True)
+    vbs.hdim(B['lo'][1], B['pivot'][1], B['hi'][2] + 6, B['plate_top'], B['hi'][2],
+             label=f'前 {f1(B["pivot"][1] - B["lo"][1])}')
+    vbs.hdim(B['pivot'][1], B['hi'][1], B['hi'][2] + 6, None, B['plate_top'],
+             label=f'后 {f1(B["hi"][1] - B["pivot"][1])}')
+    vbs.note(B['pivot'][1] + 1.2, B['pivot'][2] + 1.2, vbs.xy(B['hi'][1], 0)[0] - 40, vbs.xy(0, B['hi'][2] - 4)[1],
+             f'轴孔 Ø{f1(B["pivot_d"])} · 臂顶 R{f1(B["arm_r_round"])}')
+    vbs.note(B['hi'][1] - 4, B['plate_top'] - 1, vbs.xy(B['hi'][1], 0)[0] - 40, vbs.xy(0, 15)[1],
+             f'底板 {f1(B["plate_top"])}（底腔虚线）', HID)
+    view_label(cv, vbs.xy(6, 0)[0], vbs.xy(0, 0)[1] + 50, '右视图 RIGHT')
+
+    pbt = Projection([base], VIEWS['top'])
+    vbt = ViewFrame(cv, pbt, vbf.ox, 0, S2)
+    vbt.oy = 1000 + B['hi'][1] * S2 + 10
+    vbt.draw(['base'], hidden=False)
+    vbt.cline(B['lo'][0] - 3, B['pivot'][1], B['hi'][0] + 3, B['pivot'][1])
+    vbt.vdim(B['lo'][1], B['hi'][1], B['lo'][0] - 6, B['lo'][0], B['lo'][0], label=f1(B['ext'][1]))
+    vbt.note(B['arm_l'][0], B['pivot'][1] - 2, vbt.xy(B['lo'][0], 0)[0] + 6, vbt.xy(0, B['lo'][1] + 10)[1],
+             f'六角螺母槽 {f1(B["hex"][4])} 深 {f1(B["hex_depth"])}')
+    view_label(cv, vbt.xy(0, 0)[0], vbt.xy(0, B['lo'][1])[1] + 24, '俯视图 TOP')
+
+    pbb = Projection([base], VIEWS['bottom'])
+    vbb = ViewFrame(cv, pbb, 0, vbt.oy, S2)
+    vbb.ox = 455
+    vbb.oy = vbt.oy - (B['hi'][1] + B['lo'][1]) * S2  # same vertical band as the top view
+    vbb.draw(['base'], hidden=False)
+    if B['feet']:
+        ft = B['feet'][0]
+        vbb.hdim(ft[0], ft[2], -ft[3] - 3, None, None, label=f'垫槽 {f1(ft[4])}', below=True)
+    pe = B['pocket_env']
+    vbb.hdim(pe[0], pe[2], -B['hi'][1] - 3, None, None, label=f'减重腔 {f1(pe[4])}×{f1(pe[5])}', below=True)
+    vbb.note(0.0, -B['pivot'][1] - 14, vbb.xy(B['hi'][0], 0)[0] + 4, vbb.xy(0, -B['pivot'][1] - 18)[1],
+             f'十字筋 {f1(B["rib_w"])}', ACC)
+    view_label(cv, vbb.xy(0, 0)[0], vbb.xy(0, -B['hi'][1])[1] + 40, '仰视图 BOTTOM' + (f'（垫槽深 {f1(B["foot_depth"])}）' if B['feet'] else f'（触桌面积 {B["contact"] / 100:.1f} cm²，无独立垫槽）'))
+
+    # Knob: top + side
+    S3 = 3.4
+    pkt = Projection([knob], VIEWS['bottom'])
+    vkt = ViewFrame(cv, pkt, 760, 905, S3)
+    vkt.draw(['knob'], hidden=False)
+    vkt.center(0, 0, K['ext'][0] / 2 + 3)
+    vkt.hdim(K['lo'][0], K['hi'][0], K['lo'][1] - 4, None, None, label=f'Ø{f1(K["ext"][0])}', below=True)
+    view_label(cv, vkt.xy(0, 0)[0], vkt.xy(0, K['lo'][1])[1] + 36, f'旋钮底视 · {K["ridges"]} 道防滑筋')
+    vkt.note(K['hex'][2], 0, vkt.xy(K['hi'][0], 0)[0] + 10, vkt.xy(0, 7)[1] - 30,
+             f'六角 {f1(K["hex"][4])}', ACC)
+    pks = Projection([knob], VIEWS['front'])
+    vks = ViewFrame(cv, pks, 960, 935, S3)
+    vks.draw(['knob'])
+    vks.cline(0, -2, 0, K['hi'][2] + 2)
+    vks.vdim(0, K['hi'][2], K['lo'][0] - 4, K['lo'][0], -K['collar_d'] / 2, label=f1(K['ext'][2]))
+    vks.vdim(0, K['body_h'], K['hi'][0] + 4, K['hi'][0], K['hi'][0], label=f1(K['body_h']), left=False)
+    vks.hdim(-K['collar_d'] / 2, K['collar_d'] / 2, K['hi'][2] + 4, K['hi'][2], K['hi'][2],
+             label=f'Ø{f1(K["collar_d"])}')
+    view_label(cv, vks.xy(0, 0)[0], vks.xy(0, 0)[1] + 40, '旋钮侧视（虚线孔）')
+    cv.text(780, 1010, f'内孔 Ø{f1(K["bore"])} · 底部六角穴 {f1(K["hex"][4])}（对边 {f1(K["hex"][5])}）深 {f1(K["hex_depth"])}', 10.5, '#94a3b8')
+    cv.text(780, 1027, f'底座右臂沉孔 Ø{f1(B["cbore_d"])} 深 {f1(B["cbore_depth"])}，左臂六角槽 '
+                       f'{f1(B["hex"][4])} 深 {f1(B["hex_depth"])}', 10.5, '#94a3b8')
+
+    # ==========================================================================
+    # [C] ASSEMBLY
+    # ==========================================================================
+    panel(cv, 1092, 96, 688, 1208, '[C]', '装配 / 俯仰 / 干涉检查',
+          '机头转轴孔对准底座转轴孔（两孔均为实测圆心），绕 X 轴后仰')
+
+    # Iso shaded product view at 20 deg tilt
+    h20, b20, k20 = assemble(head, base, knob, M, 20)
+    piso = Projection([h20, b20, k20], iso_view(-38, 22))
+    Si = 2.8
+    viso = ViewFrame(cv, piso, 0, 0, Si)
+    lo, hi = piso.lo, piso.hi
+    viso.ox = 1092 + 344 - (lo[0] + hi[0]) / 2 * Si
+    viso.oy = 160 + hi[1] * Si
+    viso.draw_shaded(['head', 'base', 'knob'])
+    cv.text(1110, 160, '等轴测着色（后仰 20°，网格直接渲染）', 11, '#94a3b8')
+
+    # Side view: 0 deg solid + 45 deg ghost + clash highlight
+    h0, b0, k0 = assemble(head, base, knob, M, 0)
+    h45, _, _ = assemble(head, base, knob, M, 45)
+    Ss = 2.7
+    pside = Projection([h0, b0, k0], VIEWS['right'])
+    vs = ViewFrame(cv, pside, 1092 + 300 - 0 * Ss, 0, Ss)
+    vs.ox = 1092 + 344 - ((B['lo'][1] + B['hi'][1]) / 2) * Ss
+    vs.oy = 868
+    pg = Projection([h45], VIEWS['right'])
+    vg = ViewFrame(cv, pg, vs.ox, vs.oy, Ss)
+    cv.add(f'<path d="{vg.poly_path(pg.silhouette(0))}" fill="{ACC}" fill-opacity="0.07" stroke="{ACC}" '
+           f'stroke-width="1" stroke-dasharray="5 3" fill-rule="evenodd"/>')
+    vs.draw(['head', 'base', 'knob'], hidden=False)
+    for t, ccol in ((0, BAD),):
+        vol, inter = clash[t]
+        if vol > 0:
+            pi = Projection([inter], VIEWS['right'])
+            vi = ViewFrame(cv, pi, vs.ox, vs.oy, Ss)
+            cv.add(f'<path d="{vi.poly_path(pi.silhouette(0))}" fill="{ccol}" stroke="{ccol}" stroke-width="1.5"/>')
+            ib = inter.bounds
+            qx, qy = vs.xy((ib[0][1] + ib[1][1]) / 2, (ib[0][2] + ib[1][2]) / 2)
+            cv.add(f'<circle cx="{qx:.1f}" cy="{qy:.1f}" r="13" fill="none" stroke="{ccol}" stroke-width="1.4"/>')
+            cv.add(f'<polyline points="{qx - 13:.1f},{qy:.1f} {qx - 60:.1f},{qy - 30:.1f} {qx - 150:.1f},{qy - 30:.1f}" '
+                   f'fill="none" stroke="{ccol}" stroke-width="0.8"/>')
+            cv.text(qx - 150, qy - 34, f'干涉 {clash_mm:.2f} mm（{vol:.1f} mm³）', 11, ccol, weight='bold')
+    vs.center(bp[1], bp[2], 10)
+    # arc showing tilt travel of the screen top-front corner
+    top_front = np.array([0, 0, H['cab_z'][1]]) - np.array(H['pivot']) + bp
+    rr = math.hypot(top_front[1] - bp[1], top_front[2] - bp[2])
+    a0 = math.atan2(top_front[2] - bp[2], top_front[1] - bp[1])
+    x0, y0 = vs.xy(bp[1] + rr * math.cos(a0), bp[2] + rr * math.sin(a0))
+    x1, y1 = vs.xy(bp[1] + rr * math.cos(a0 - math.radians(45)), bp[2] + rr * math.sin(a0 - math.radians(45)))
+    cv.add(f'<path d="M{x0:.1f} {y0:.1f}A{rr * Ss:.1f} {rr * Ss:.1f} 0 0 1 {x1:.1f} {y1:.1f}" fill="none" '
+           f'stroke="{ACC}" stroke-width="1.2" marker-end="url(#ar)"/>')
+    cv.text(x1 + 6, y1 - 6, '0° → 45°', 11, ACC, weight='bold')
+    total_h = h0.bounds[1][2]
+    vs.vdim(0, total_h, B['lo'][1] - 40, B['lo'][1], H['cab_y'][0] - H['pivot'][1] + bp[1],
+            label=f'装配总高 {f1(total_h)}')
+    vs.vdim(0, bp[2], B['hi'][1] + 6, B['hi'][1], bp[1], label=f'轴高 {f1(bp[2])}', left=False)
+    # tipping margin at 45 deg: centre of mass of head+base vs footprint
+    com45 = (h45.center_mass * h45.volume + base.center_mass * base.volume) / (h45.volume + base.volume)
+    cx_, cy_ = vs.xy(com45[1], com45[2])
+    cv.add(f'<circle cx="{cx_:.1f}" cy="{cy_:.1f}" r="4" fill="none" stroke="{OK}" stroke-width="1.5"/>'
+           f'<line x1="{cx_:.1f}" y1="{cy_:.1f}" x2="{cx_:.1f}" y2="{vs.xy(0, 0)[1]:.1f}" stroke="{OK}" '
+           f'stroke-width="0.8" stroke-dasharray="3 2"/>')
+    margin = B['hi'][1] - com45[1]
+    cv.text(cx_ + 8, cy_ + 4, f'45° 重心 Y{com45[1]:+.1f}', 10.5, OK)
+    view_label(cv, vs.xy(6, 0)[0], vs.oy + 30, '右视装配：实线 0°，橙虚线 45°，红色 = 干涉体')
+
+    # Check list
+    cy = 935
+    cv.text(1110, cy, '装配实测校核', 13, '#7dd3fc', weight='bold')
+    checks = []
+    gap_c = (B['gap'] - H['lug_w']) / 2
+    checks.append((gap_c > 0, f'凸耳 {f1(H["lug_w"])} 入叉口 {f1(B["gap"])}：单侧间隙 {gap_c:.2f}'))
+    checks.append((abs(H['pivot_d'] - B['pivot_d']) < 0.5,
+                   f'转轴孔 机头 Ø{f1(H["pivot_d"])} / 底座 Ø{f1(B["pivot_d"])}（M3 螺栓）'))
+    span = B['arm_r'][1] - B['arm_l'][0]
+    checks.append((True, f'叉臂外宽 {f1(span)} + 旋钮 {f1(K["ext"][2])} = {f1(span + K["ext"][2])}（螺栓长度参考）'))
+    vmax = max(v for v, _ in clash.values())
+    checks.append((vmax < 1e-3, f'机头⇄底座干涉：' + ' / '.join(f'{t}° {clash[t][0]:.1f}mm³' for t in tilt_samples)))
+    checks.append((clash_mm <= 0, f'臂顶圆角 R{f1(B["arm_r_round"])} vs 轴心到机身底面 {f1(pivot_to_cab)}：' +
+                   (f'间隙 {-clash_mm:.2f}' if clash_mm <= 0 else f'重叠 {clash_mm:.2f}')))
+    checks.append((H['web'] >= 0.8, f'屏幕窗 ⇄ 摇杆孔 间隔 {H["web"]:.2f}（嘉立创最小壁厚 0.8）'))
+    checks.append((bool(B['feet']), '底面防滑垫槽：' + (f'{len(B["feet"])} 个' if B['feet'] else
+                                                     '网格中不存在（落入减重腔被吞掉）')))
+    checks.append((margin > 0, f'45° 后仰合重心距后缘 {f1(margin)}（不含 Wio 本体）'))
+    for name, d in (('机头', H), ('底座', B), ('旋钮', K)):
+        checks.append((d['watertight'] and d['shells'] == 1 and max(d['ext']) <= 100,
+                       f'{name}：水密 {"✓" if d["watertight"] else "✗"} · 壳体 {d["shells"]} · '
+                       f'最大边 {f1(max(d["ext"]))} ≤ 100'))
+    jlc = H['vol'] + B['vol']
+    checks.append((jlc <= 70, f'嘉立创免费：机头+底座 {jlc:.2f} cm³ ≤ 70'))
+    for i, (ok, s) in enumerate(checks):
+        yy = cy + 26 + i * 21
+        cv.text(1112, yy, '✓' if ok else '✗', 13, OK if ok else BAD, weight='bold')
+        cv.text(1132, yy, s, 11, INK if ok else '#fda4af')
+
+    cv.add('</svg>')
+    os.makedirs(os.path.dirname(OUT), exist_ok=True)
+    with open(OUT, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(cv.out))
+
+    # Print the measurement report for cross-checking
+    for name in ('head', 'base', 'knob'):
+        print(f'--- {name} ---')
+        for k, v in M[name].items():
+            if isinstance(v, (tuple, list, np.ndarray)):
+                v = tuple(round(float(x), 2) if isinstance(x, (int, float, np.floating)) else x for x in np.ravel(v)) \
+                    if not (isinstance(v, list) and v and isinstance(v[0], tuple)) else [tuple(round(x, 2) for x in t) for t in v]
+            elif isinstance(v, float):
+                v = round(v, 3)
+            print(f'  {k:14s} {v}')
+    print('clash mm3:', {t: round(v, 2) for t, (v, _) in clash.items()}, 'overlap', round(clash_mm, 2))
+    print('wrote', OUT, os.path.getsize(OUT) // 1024, 'KB')
+
 
 if __name__ == '__main__':
-    generate_svg()
+    build()
