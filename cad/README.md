@@ -28,6 +28,10 @@ cad/
 
 ## 🎨 方案介绍：可自由俯仰摆动的复古小电视监视器 (`wio_tilt_tv`)
 
+<p align="center">
+  <img src="preview_render.jpg" width="600" alt="成品实物效果渲染图"/>
+</p>
+
 结合了“复古小电视”的颜值与“仰角自由调节”的人机工学：
 - **机头组件 (`wio_tilt_tv_head.stl`)**：
   - 复古 CRT 电视机造型，正面前框带有微弧显像管包裹视窗；
