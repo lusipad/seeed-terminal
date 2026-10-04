@@ -1,32 +1,24 @@
-// ==============================================================================
-// Wio Terminal 桌面多功能 30° 仰角底座与音腔背壳 (Desktop Angled Dock & Sound Chamber)
-// ==============================================================================
+// Wio Terminal 30° 桌面固定底座与音腔背壳 (OpenSCAD 源码)
+// 官方标准两 M3 螺丝孔距: 61.00 mm (X = +/- 30.5 mm)
 $fn = 60;
-wio_width   = 72.0;
-wio_height  = 57.0;
-wio_depth   = 12.0;
-dock_width  = 84.0;
-dock_depth  = 74.0;
-front_h     = 10.0;
-back_h      = 46.0;
-tilt_angle  = 30.0;
-
-module wio_desktop_dock() {
+module wio_dock() {
     difference() {
         union() {
-            translate([-dock_width/2, 0, 0]) cube([dock_width, dock_depth, 3.0]);
-            translate([-dock_width/2, 0, 0]) cube([dock_width, 4.0, 14.0]);
-            translate([-dock_width/2 + 4.5, dock_depth - 3.5, 0]) cube([dock_width - 9.0, 3.5, back_h]);
-            rotate([tilt_angle, 0, 0])
-                translate([-dock_width/2 + 4.5, 10.0, -2.0]) cube([dock_width - 9.0, 60.0, 3.5]);
-            translate([-20 - 4, dock_depth/2 - 4, 12]) cube([8, 8, 12]);
-            translate([ 20 - 4, dock_depth/2 - 4, 12]) cube([8, 8, 12]);
+            translate([-42, 0, 0]) cube([84, 74, 3]);
+            translate([-42, 0, 0]) cube([84, 4, 14]);
+            translate([-42, 70, 0]) cube([84, 4, 46]);
+            rotate([28, 0, 0]) translate([-42, 10, 0]) cube([84, 62, 4]);
+            // 螺丝固定座 (X = +/- 30.5mm)
+            translate([-30.5 - 4, 30, 0]) cube([8, 12, 18]);
+            translate([ 30.5 - 4, 30, 0]) cube([8, 12, 18]);
         }
-        translate([-30, 15, 3.0]) cube([60, 45, 18]);
-        for (i = [-5 : 5]) {
-            translate([i * 6.5 - 1.2, dock_depth - 5.0, 14.0]) cube([2.4, 8.0, 22.0]);
-        }
-        translate([-dock_width/2 - 1, 14.0, 4.0]) cube([10.0, 18.0, 10.0]);
+        // 内部空腔
+        translate([-27, 16, 2]) cube([54, 44, 20]);
+        // M3 穿孔 (间距 61.00mm)
+        translate([-30.5, 36, 0]) cylinder(d=3.4, h=40);
+        translate([ 30.5, 36, 0]) cylinder(d=3.4, h=40);
+        // Type-C 出线口
+        translate([-43, 12, 2]) cube([6, 18, 12]);
     }
 }
-wio_desktop_dock();
+wio_dock();

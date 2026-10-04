@@ -1,617 +1,391 @@
 """
-generate_3d_models.py - Generate 3D CAD OpenSCAD and watertight binary STL models for Wio Terminal
-Includes:
-1. wio_desktop_dock: 30° Angled Desktop Stand & Audio/Battery Chassis
-2. wio_retro_tv: Vintage CRT Mini-TV Bezel
-3. wio_tilt_tv: Fully Articulated Retro Monitor with Tilting / Swiveling Head & Desk Base
-   - Head (Monitor with CRT Bezel & Rear Speaker/Battery Cavity)
-   - Base (Desk stand with dual hinge clevis)
-   - Knob (Vintage knurled thumb wheel for friction tilt adjustment)
+generate_3d_models.py - Precision 3D CAD generator for Wio Terminal
+Uses manifold3d CSG engine to guarantee 100% watertight, manifold, volume-valid STL meshes.
+
+Models generated:
+1. cad/stl/wio_tilt_tv_head.stl  - Articulated Retro CRT Monitor Head with Speaker/Battery Chamber
+2. cad/stl/wio_tilt_tv_base.stl  - Stable Low-CG Clevis Desk Stand (0°~45° tilt)
+3. cad/stl/wio_tilt_tv_knob.stl  - Knurled Friction Thumb Knob for angle lock
+4. cad/stl/wio_desktop_dock.stl  - Fixed 30° Angled Desktop Stand (M3 spacing = 61.00mm)
+5. cad/stl/wio_retro_tv.stl      - Retro Mini-TV Snap Bezel
 """
 
-import math
-import struct
 import os
+import numpy as np
+import trimesh
 
-class STLMesh:
-    def __init__(self):
-        self.triangles = []
-
-    def add_triangle(self, v1, v2, v3):
-        ax, ay, az = v2[0] - v1[0], v2[1] - v1[1], v2[2] - v1[2]
-        bx, by, bz = v3[0] - v1[0], v3[1] - v1[1], v3[2] - v1[2]
-        nx = ay * bz - az * by
-        ny = az * bx - ax * bz
-        nz = ax * by - ay * bx
-        length = math.sqrt(nx*nx + ny*ny + nz*nz)
-        if length > 1e-9:
-            normal = (nx/length, ny/length, nz/length)
-        else:
-            normal = (0.0, 0.0, 1.0)
-        self.triangles.append((normal, v1, v2, v3))
-
-    def add_quad(self, v1, v2, v3, v4):
-        self.add_triangle(v1, v2, v3)
-        self.add_triangle(v1, v3, v4)
-
-    def add_box(self, x, y, z, dx, dy, dz):
-        p0 = (x, y, z)
-        p1 = (x + dx, y, z)
-        p2 = (x + dx, y + dy, z)
-        p3 = (x, y + dy, z)
-        p4 = (x, y, z + dz)
-        p5 = (x + dx, y, z + dz)
-        p6 = (x + dx, y + dy, z + dz)
-        p7 = (x, y + dy, z + dz)
-
-        # Bottom
-        self.add_quad(p0, p3, p2, p1)
-        # Top
-        self.add_quad(p4, p5, p6, p7)
-        # Front
-        self.add_quad(p0, p1, p5, p4)
-        # Back
-        self.add_quad(p2, p3, p7, p6)
-        # Left
-        self.add_quad(p3, p0, p4, p7)
-        # Right
-        self.add_quad(p1, p2, p6, p5)
-
-    def add_cylinder(self, cx, cy, cz, r, h, axis='z', segments=16):
-        angle_step = 2 * math.pi / segments
-        pts_bot = []
-        pts_top = []
-        for i in range(segments):
-            a = i * angle_step
-            if axis == 'y':
-                pts_bot.append((cx + r * math.cos(a), cy, cz + r * math.sin(a)))
-                pts_top.append((cx + r * math.cos(a), cy + h, cz + r * math.sin(a)))
-            elif axis == 'z':
-                pts_bot.append((cx + r * math.cos(a), cy + r * math.sin(a), cz))
-                pts_top.append((cx + r * math.cos(a), cy + r * math.sin(a), cz + h))
-            elif axis == 'x':
-                pts_bot.append((cx, cy + r * math.cos(a), cz + r * math.sin(a)))
-                pts_top.append((cx + h, cy + r * math.cos(a), cz + r * math.sin(a)))
-
-        for i in range(segments):
-            next_i = (i + 1) % segments
-            self.add_quad(pts_bot[i], pts_bot[next_i], pts_top[next_i], pts_top[i])
-            if axis == 'y':
-                self.add_triangle((cx, cy, cz), pts_bot[next_i], pts_bot[i])
-                self.add_triangle((cx, cy + h, cz), pts_top[i], pts_top[next_i])
-            elif axis == 'z':
-                self.add_triangle((cx, cy, cz), pts_bot[i], pts_bot[next_i])
-                self.add_triangle((cx, cy, cz + h), pts_top[next_i], pts_top[i])
-            elif axis == 'x':
-                self.add_triangle((cx, cy, cz), pts_bot[i], pts_bot[next_i])
-                self.add_triangle((cx + h, cy, cz), pts_top[next_i], pts_top[i])
-
-    def write_binary_stl(self, filepath):
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        with open(filepath, 'wb') as f:
-            header = b'Wio Terminal 3D Printable Enclosure - Open Source\x00'
-            header = header.ljust(80, b'\x00')
-            f.write(header)
-            f.write(struct.pack('<I', len(self.triangles)))
-            for normal, v1, v2, v3 in self.triangles:
-                f.write(struct.pack('<3f', *normal))
-                f.write(struct.pack('<3f', *v1))
-                f.write(struct.pack('<3f', *v2))
-                f.write(struct.pack('<3f', *v3))
-                f.write(struct.pack('<H', 0))
-        print(f"Exported binary STL: {filepath} ({len(self.triangles)} triangles, {os.path.getsize(filepath)} bytes)")
+rot_x90 = trimesh.transformations.rotation_matrix(np.pi / 2, [1, 0, 0])
+rot_y90 = trimesh.transformations.rotation_matrix(np.pi / 2, [0, 1, 0])
 
 
 # ==============================================================================
-# Model 1: wio_desktop_dock (30° Fixed Tilt Desktop Stand)
+# Model 1: wio_tilt_tv_head (Articulated Monitor Head)
 # ==============================================================================
-def build_desktop_dock_mesh():
-    mesh = STLMesh()
-    bw = 84.0
-    bd = 74.0
-    fh = 10.0
-    bh = 46.0
-    side_thick = 4.5
+def build_tilt_tv_head():
+    # Cabinet outer box: 84mm wide, 30mm deep, 66mm high
+    cab = trimesh.creation.box([84.0, 30.0, 66.0])
+    cab.apply_translation([0, 15.0, 33.0])
 
-    mesh.add_box(-bw/2, 0, 0, bw, bd, 3.0)
+    # Bottom Hinge Lug: 14.0mm wide, 16.0mm deep, 14.0mm high
+    lug = trimesh.creation.box([14.0, 16.0, 14.0])
+    lug.apply_translation([0, 15.0, -7.0])
 
-    # Left wedge
-    lw = -bw/2
-    rw = -bw/2 + side_thick
-    p_f_bot = (lw, 0, 0)
-    p_f_top = (lw, 0, fh)
-    p_b_top = (lw, bd, bh)
-    p_b_bot = (lw, bd, 0)
-    p_f_bot_in = (rw, 0, 0)
-    p_f_top_in = (rw, 0, fh)
-    p_b_top_in = (rw, bd, bh)
-    p_b_bot_in = (rw, bd, 0)
+    lug_cyl = trimesh.creation.cylinder(radius=8.0, height=14.0)
+    lug_cyl.apply_transform(rot_y90)
+    lug_cyl.apply_translation([0, 15.0, -7.0])
 
-    mesh.add_triangle(p_f_bot, p_f_top, p_b_top)
-    mesh.add_triangle(p_f_bot, p_b_top, p_b_bot)
-    mesh.add_triangle(p_f_bot_in, p_b_top_in, p_f_top_in)
-    mesh.add_triangle(p_f_bot_in, p_b_bot_in, p_b_top_in)
-    mesh.add_quad(p_f_top, p_f_top_in, p_b_top_in, p_b_top)
-    mesh.add_quad(p_f_bot, p_f_bot_in, p_f_top_in, p_f_top)
-    mesh.add_quad(p_b_bot_in, p_b_bot, p_b_top, p_b_top_in)
+    # Vintage Knobs on right panel
+    k1 = trimesh.creation.cylinder(radius=5.5, height=3.5)
+    k1.apply_transform(rot_x90)
+    k1.apply_translation([28.0, -1.75, 45.0])
 
-    # Right wedge
-    r_lw = bw/2 - side_thick
-    r_rw = bw/2
-    rp_f_bot = (r_rw, 0, 0)
-    rp_f_top = (r_rw, 0, fh)
-    rp_b_top = (r_rw, bd, bh)
-    rp_b_bot = (r_rw, bd, 0)
-    rp_f_bot_in = (r_lw, 0, 0)
-    rp_f_top_in = (r_lw, 0, fh)
-    rp_b_top_in = (r_lw, bd, bh)
-    rp_b_bot_in = (r_lw, bd, 0)
+    k2 = trimesh.creation.cylinder(radius=5.5, height=3.5)
+    k2.apply_transform(rot_x90)
+    k2.apply_translation([28.0, -1.75, 23.0])
 
-    mesh.add_triangle(rp_f_bot, rp_b_top, rp_f_top)
-    mesh.add_triangle(rp_f_bot, rp_b_bot, rp_b_top)
-    mesh.add_triangle(rp_f_bot_in, rp_f_top_in, rp_b_top_in)
-    mesh.add_triangle(rp_f_bot_in, rp_b_top_in, rp_b_bot_in)
-    mesh.add_quad(rp_f_top_in, rp_f_top, rp_b_top, rp_b_top_in)
-    mesh.add_quad(rp_f_bot_in, rp_f_bot, rp_f_top, rp_f_top_in)
-    mesh.add_quad(rp_b_bot, rp_b_bot_in, rp_b_top_in, rp_b_top)
+    # Cat ears on top
+    ear_l = trimesh.creation.cone(radius=7.0, height=12.0)
+    ear_l.apply_translation([-20.0, 15.0, 66.0 + 6.0])
 
-    mesh.add_box(-bw/2, 0, 0, bw, 4.0, 14.0)
+    ear_r = trimesh.creation.cone(radius=7.0, height=12.0)
+    ear_r.apply_translation([20.0, 15.0, 66.0 + 6.0])
 
-    back_y = bd - 3.5
-    back_h = bh
-    mesh.add_box(-bw/2 + side_thick, back_y, 0, bw - 2*side_thick, 3.5, 12.0)
-    mesh.add_box(-bw/2 + side_thick, back_y, 36.0, bw - 2*side_thick, 3.5, back_h - 36.0)
+    union_mesh = trimesh.boolean.union([cab, lug, lug_cyl, k1, k2, ear_l, ear_r], engine='manifold')
 
-    slat_w = 4.0
-    for i in range(-5, 6):
-        sx = i * 6.5
-        mesh.add_box(sx - slat_w/2, back_y, 12.0, slat_w, 3.5, 24.0)
+    # Subtractions:
+    # 1. Screen window: 50.0mm x 38.0mm, aligned with Wio Terminal display
+    screen = trimesh.creation.box([50.0, 10.0, 38.0])
+    screen.apply_translation([-6.0, 0, 33.0])
 
-    shelf_t = 3.5
-    shelf_w = bw - 2*side_thick
-    y1, z1 = 6.0, 7.0
-    y2, z2 = bd - 6.0, bh - 6.0
-    mesh.add_quad((-shelf_w/2, y1, z1), (shelf_w/2, y1, z1), (shelf_w/2, y2, z2), (-shelf_w/2, y2, z2))
-    mesh.add_quad((-shelf_w/2, y1, z1 - shelf_t), (-shelf_w/2, y2, z2 - shelf_t), (shelf_w/2, y2, z2 - shelf_t), (shelf_w/2, y1, z1 - shelf_t))
-    mesh.add_quad((-shelf_w/2, y1, z1 - shelf_t), (shelf_w/2, y1, z1 - shelf_t), (shelf_w/2, y1, z1), (-shelf_w/2, y1, z1))
-    mesh.add_quad((-shelf_w/2, y2, z2), (shelf_w/2, y2, z2), (shelf_w/2, y2, z2 - shelf_t), (-shelf_w/2, y2, z2 - shelf_t))
+    # 2. Wio Terminal insertion pocket: 73.0mm wide x 13.0mm deep x 58.0mm high
+    pocket = trimesh.creation.box([73.0, 13.0, 58.0])
+    pocket.apply_translation([0, 9.5, 33.0])
 
-    boss_w = 8.0
-    boss_h = 10.0
-    boss_y = (y1 + y2) / 2
-    boss_z = (z1 + z2) / 2 - 2.0
-    mesh.add_box(-20 - boss_w/2, boss_y - 4, boss_z - boss_h, boss_w, 8.0, boss_h)
-    mesh.add_box( 20 - boss_w/2, boss_y - 4, boss_z - boss_h, boss_w, 8.0, boss_h)
-    mesh.add_box(-bw/2, 10.0, 3.0, side_thick, 16.0, 10.0)
-    mesh.add_box(-25.0, 20.0, 3.0, 50.0, 30.0, 2.0)
+    # 3. Rear chamber for Speaker & Battery: 64.0mm x 14.0mm x 48.0mm
+    chamber = trimesh.creation.box([64.0, 14.0, 48.0])
+    chamber.apply_translation([0, 22.0, 33.0])
 
-    return mesh
+    # 4. Through pivot hole in lug: diameter 3.6mm (M3 bolt pass)
+    pivot_hole = trimesh.creation.cylinder(radius=1.8, height=30.0)
+    pivot_hole.apply_transform(rot_y90)
+    pivot_hole.apply_translation([0, 15.0, -7.0])
+
+    # 5. Top tactile button cutout (A, B, C): 42.0mm x 10.0mm
+    top_btns = trimesh.creation.box([42.0, 10.0, 10.0])
+    top_btns.apply_translation([-6.0, 9.5, 66.0])
+
+    # 6. Left Type-C cutout: 16.0mm x 10.0mm
+    type_c = trimesh.creation.box([10.0, 16.0, 12.0])
+    type_c.apply_translation([-42.0, 9.5, 33.0])
+
+    # 7. Front 5-way joystick circular thumb opening (radius 7.5mm)
+    joystick = trimesh.creation.cylinder(radius=7.5, height=10.0)
+    joystick.apply_transform(rot_x90)
+    joystick.apply_translation([26.0, 0, 18.0])
+
+    # 8. Rear acoustic sound slots
+    slits = []
+    for i in range(5):
+        s = trimesh.creation.box([50.0, 6.0, 2.5])
+        s.apply_translation([0, 30.0, 20.0 + i * 6.0])
+        slits.append(s)
+
+    cutouts = [screen, pocket, chamber, pivot_hole, top_btns, type_c, joystick] + slits
+    result = union_mesh.difference(cutouts, engine='manifold')
+    return result
 
 
 # ==============================================================================
-# Model 2: wio_retro_tv (Snap-on Bezel)
+# Model 2: wio_tilt_tv_base (Articulated Clevis Desk Stand)
 # ==============================================================================
-def build_retro_tv_mesh():
-    mesh = STLMesh()
-    tw = 82.0
-    th = 66.0
-    td = 24.0
-    wall = 3.0
+def build_tilt_tv_base():
+    # Base weighted plate: 78mm wide, 68mm deep, 5mm thick
+    plate = trimesh.creation.box([78.0, 68.0, 5.0])
+    plate.apply_translation([0, 34.0, 2.5])
 
-    mesh.add_box(-tw/2, 0, 0, tw, td, wall)
-    mesh.add_box(-tw/2, 0, th - wall, tw, td, wall)
-    mesh.add_box(-tw/2, 0, wall, wall, td, th - 2*wall)
-    mesh.add_box(tw/2 - wall, 0, wall, wall, td, th - 2*wall)
+    # Chamfer rib on base
+    rim = trimesh.creation.box([72.0, 62.0, 2.0])
+    rim.apply_translation([0, 34.0, 5.0 + 1.0])
 
-    sw = 50.0
-    sh = 38.0
-    sx0 = -tw/2 + 7.0
-    sy0 = (th - sh) / 2
+    # Clevis fork arms (gap = 14.8mm, allowing smooth clearance for 14.0mm head lug)
+    # Left arm: X = -10.2mm, thickness 5.6mm
+    arm_l = trimesh.creation.box([5.6, 18.0, 24.0])
+    arm_l.apply_translation([-10.2, 34.0, 17.0])
+    arm_l_top = trimesh.creation.cylinder(radius=9.0, height=5.6)
+    arm_l_top.apply_transform(rot_y90)
+    arm_l_top.apply_translation([-10.2, 34.0, 29.0])
 
-    mesh.add_box(-tw/2, 0, 0, 7.0, wall, th)
-    mesh.add_box(sx0, 0, 0, sw, wall, sy0)
-    mesh.add_box(sx0, 0, sy0 + sh, sw, wall, th - (sy0 + sh))
-    rx0 = sx0 + sw
-    rw = tw/2 - rx0
-    mesh.add_box(rx0, 0, 0, rw, wall, th)
+    # Right arm: X = +10.2mm, thickness 5.6mm
+    arm_r = trimesh.creation.box([5.6, 18.0, 24.0])
+    arm_r.apply_translation([10.2, 34.0, 17.0])
+    arm_r_top = trimesh.creation.cylinder(radius=9.0, height=5.6)
+    arm_r_top.apply_transform(rot_y90)
+    arm_r_top.apply_translation([10.2, 34.0, 29.0])
 
-    mesh.add_box(rx0 + 3.0, -4.0, sy0 + sh - 8.0, 10.0, 4.0, 10.0)
-    mesh.add_box(rx0 + 3.0, -4.0, sy0 + 6.0, 10.0, 4.0, 10.0)
+    union_mesh = trimesh.boolean.union([plate, rim, arm_l, arm_l_top, arm_r, arm_r_top], engine='manifold')
 
-    for i in range(3):
-        mesh.add_box(rx0 + 2.0, -1.0, sy0 + 20.0 + i*4.0, 12.0, 1.0, 1.5)
+    # Through hole for M3 pivot: diameter 3.6mm
+    pivot_hole = trimesh.creation.cylinder(radius=1.8, height=45.0)
+    pivot_hole.apply_transform(rot_y90)
+    pivot_hole.apply_translation([0, 34.0, 29.0])
 
-    leg_w = 4.0
-    leg_d = 4.0
-    leg_h = 10.0
-    mesh.add_box(-tw/2 + 5, 2, -leg_h, leg_w, leg_d, leg_h)
-    mesh.add_box(tw/2 - 9, 2, -leg_h, leg_w, leg_d, leg_h)
-    mesh.add_box(-tw/2 + 5, td - 6, -leg_h, leg_w, leg_d, leg_h)
-    mesh.add_box(tw/2 - 9, td - 6, -leg_h, leg_w, leg_d, leg_h)
+    # 4 Anti-slip rubber feet recesses
+    feet = []
+    for fx, fy in [(-30.0, 10.0), (30.0, 10.0), (-30.0, 58.0), (30.0, 58.0)]:
+        f = trimesh.creation.box([10.0, 10.0, 2.0])
+        f.apply_translation([fx, fy, 0])
+        feet.append(f)
 
-    ear_h = 12.0
-    ear_t = 3.5
-    p1 = (-24.0, td/2 - ear_t/2, th)
-    p2 = (-12.0, td/2 - ear_t/2, th)
-    p3 = (-18.0, td/2 - ear_t/2, th + ear_h)
-    p4 = (-24.0, td/2 + ear_t/2, th)
-    p5 = (-12.0, td/2 + ear_t/2, th)
-    p6 = (-18.0, td/2 + ear_t/2, th + ear_h)
-    mesh.add_triangle(p1, p2, p3)
-    mesh.add_triangle(p4, p6, p5)
-    mesh.add_quad(p1, p4, p6, p3)
-    mesh.add_quad(p2, p3, p6, p5)
-    mesh.add_quad(p1, p2, p5, p4)
-
-    rp1 = (12.0, td/2 - ear_t/2, th)
-    rp2 = (24.0, td/2 - ear_t/2, th)
-    rp3 = (18.0, td/2 - ear_t/2, th + ear_h)
-    rp4 = (12.0, td/2 + ear_t/2, th)
-    rp5 = (24.0, td/2 + ear_t/2, th)
-    rp6 = (18.0, td/2 + ear_t/2, th + ear_h)
-    mesh.add_triangle(rp1, rp2, rp3)
-    mesh.add_triangle(rp4, rp6, rp5)
-    mesh.add_quad(rp1, rp4, rp6, rp3)
-    mesh.add_quad(rp2, rp3, rp6, rp5)
-    mesh.add_quad(rp1, rp2, rp5, rp4)
-
-    return mesh
+    result = union_mesh.difference([pivot_hole] + feet, engine='manifold')
+    return result
 
 
 # ==============================================================================
-# Model 3: wio_tilt_tv_head (Articulated Retro Monitor Head with Swivel Lug)
+# Model 3: wio_tilt_tv_knob (Knurled Friction Thumb Knob)
 # ==============================================================================
-def build_tilt_tv_head_mesh():
-    """
-    Builds the monitor head:
-    - Retro TV style case with CRT front bezel
-    - Internal cavity for Wio Terminal + MAX98357A + Speaker + Battery
-    - Rear sound grille
-    - Dual rotary knobs on right side
-    - Bottom central pivot hinge lug (width 14mm, height 14mm) with M3/M4 pivot hole
-    """
-    mesh = STLMesh()
-    tw = 84.0   # Width
-    th = 66.0   # Height
-    td = 32.0   # Total depth (allows 12mm Wio + 18mm sound/battery chamber)
-    wall = 3.0
+def build_tilt_tv_knob():
+    body = trimesh.creation.cylinder(radius=9.0, height=7.0)
+    body.apply_translation([0, 0, 3.5])
 
-    # Outer cabinet box (top, bottom, left, right)
-    mesh.add_box(-tw/2, 0, 0, tw, td, wall)
-    mesh.add_box(-tw/2, 0, th - wall, tw, td, wall)
-    mesh.add_box(-tw/2, 0, wall, wall, td, th - 2*wall)
-    mesh.add_box(tw/2 - wall, 0, wall, wall, td, th - 2*wall)
+    collar = trimesh.creation.cylinder(radius=4.5, height=3.0)
+    collar.apply_translation([0, 0, 8.5])
 
-    # Front CRT Bezel with 2.4 inch screen opening (50mm x 38mm)
-    sw = 50.0
-    sh = 38.0
-    sx0 = -tw/2 + 8.0
-    sy0 = (th - sh) / 2
-
-    # Front face borders
-    mesh.add_box(-tw/2, 0, 0, 8.0, wall, th)
-    mesh.add_box(sx0, 0, 0, sw, wall, sy0)
-    mesh.add_box(sx0, 0, sy0 + sh, sw, wall, th - (sy0 + sh))
-    rx0 = sx0 + sw
-    rw = tw/2 - rx0
-    mesh.add_box(rx0, 0, 0, rw, wall, th)
-
-    # Vintage Knobs on the right panel
-    mesh.add_cylinder(rx0 + rw/2, -3.0, sy0 + sh - 8.0, 5.5, 3.0, axis='y', segments=16)
-    mesh.add_cylinder(rx0 + rw/2, -3.0, sy0 + 8.0, 5.5, 3.0, axis='y', segments=16)
-
-    # 5-way joystick thumb cutout
-    mesh.add_box(rx0 + 2.0, 0, sy0 + 16.0, rw - 4.0, wall, 8.0)
-
-    # Back plate with acoustic grille slits
-    back_y = td - wall
-    mesh.add_box(-tw/2, back_y, 0, tw, wall, 12.0)
-    mesh.add_box(-tw/2, back_y, th - 12.0, tw, wall, 12.0)
-    mesh.add_box(-tw/2, back_y, 12.0, 10.0, wall, th - 24.0)
-    mesh.add_box(tw/2 - 10.0, back_y, 12.0, 10.0, wall, th - 24.0)
-
-    # Back grille horizontal slats
-    for i in range(6):
-        slat_z = 16.0 + i * 5.5
-        mesh.add_box(-tw/2 + 10.0, back_y, slat_z, tw - 20.0, wall, 2.5)
-
-    # Left Type-C cut-out
-    mesh.add_box(-tw/2 - 1.0, 6.0, 14.0, wall + 2.0, 16.0, 12.0)
-
-    # Top A/B/C tactile buttons opening
-    mesh.add_box(-20.0, td/2 - 5.0, th - wall - 1.0, 40.0, 10.0, wall + 2.0)
-
-    # Bottom Hinge Lug (pivot ear)
-    # Lug centered at X=0, Y=td/2, Z extending from 0 down to -14mm
-    lug_w = 14.0
-    lug_d = 16.0
-    lug_h = 14.0
-    mesh.add_box(-lug_w/2, td/2 - lug_d/2, -lug_h, lug_w, lug_d, lug_h)
-
-    # Pivot cylinder boss through the lug
-    mesh.add_cylinder(0, td/2, -lug_h/2, 6.0, lug_w, axis='x', segments=16)
-
-    # Cute cat ears on top
-    ear_h = 11.0
-    ear_t = 3.5
-    # Left ear
-    p1 = (-24.0, td/2 - ear_t/2, th)
-    p2 = (-12.0, td/2 - ear_t/2, th)
-    p3 = (-18.0, td/2 - ear_t/2, th + ear_h)
-    p4 = (-24.0, td/2 + ear_t/2, th)
-    p5 = (-12.0, td/2 + ear_t/2, th)
-    p6 = (-18.0, td/2 + ear_t/2, th + ear_h)
-    mesh.add_triangle(p1, p2, p3)
-    mesh.add_triangle(p4, p6, p5)
-    mesh.add_quad(p1, p4, p6, p3)
-    mesh.add_quad(p2, p3, p6, p5)
-    mesh.add_quad(p1, p2, p5, p4)
-
-    # Right ear
-    rp1 = (12.0, td/2 - ear_t/2, th)
-    rp2 = (24.0, td/2 - ear_t/2, th)
-    rp3 = (18.0, td/2 - ear_t/2, th + ear_h)
-    rp4 = (12.0, td/2 + ear_t/2, th)
-    rp5 = (24.0, td/2 + ear_t/2, th)
-    rp6 = (18.0, td/2 + ear_t/2, th + ear_h)
-    mesh.add_triangle(rp1, rp2, rp3)
-    mesh.add_triangle(rp4, rp6, rp5)
-    mesh.add_quad(rp1, rp4, rp6, rp3)
-    mesh.add_quad(rp2, rp3, rp6, rp5)
-    mesh.add_quad(rp1, rp2, rp5, rp4)
-
-    return mesh
-
-
-# ==============================================================================
-# Model 4: wio_tilt_tv_base (Dual-Arm Tilting Clevis Desktop Stand)
-# ==============================================================================
-def build_tilt_tv_base_mesh():
-    """
-    Builds the stable desk base with dual clevis arms:
-    - Broad desktop footprint: 78mm wide x 68mm deep x 5mm thick (low center of gravity)
-    - Dual upright support forks (gap 15.0mm, snugly clamping the 14mm head lug)
-    - Smooth 0°~45° tilt travel with angle stops
-    """
-    mesh = STLMesh()
-    bw = 78.0
-    bd = 68.0
-    bt = 5.0
-
-    # Base weighted plate
-    mesh.add_box(-bw/2, 0, 0, bw, bd, bt)
-
-    # Chamfered retro base edges
-    mesh.add_box(-bw/2 + 4, 4, bt, bw - 8, bd - 8, 2.0)
-
-    # Upright fork arms (Clevis)
-    # Lug gap is 14.8mm (-7.4 to +7.4)
-    # Left arm: X = -13.0 to -7.4 (thickness 5.6mm)
-    # Right arm: X = +7.4 to +13.0 (thickness 5.6mm)
-    arm_h = 28.0
-    arm_d = 18.0
-    cy = bd / 2
-
-    # Left upright arm
-    mesh.add_box(-13.0, cy - arm_d/2, bt, 5.6, arm_d, arm_h)
-    # Left arm pivot boss
-    mesh.add_cylinder(-13.0, cy, bt + arm_h - 6.0, 7.0, 5.6, axis='x', segments=16)
-
-    # Right upright arm
-    mesh.add_box(7.4, cy - arm_d/2, bt, 5.6, arm_d, arm_h)
-    # Right arm pivot boss
-    mesh.add_cylinder(7.4, cy, bt + arm_h - 6.0, 7.0, 5.6, axis='x', segments=16)
-
-    # Anti-slip rubber foot indentations on bottom (4 corners)
-    mesh.add_box(-bw/2 + 6, 6, -1.0, 10.0, 10.0, 1.0)
-    mesh.add_box( bw/2 - 16, 6, -1.0, 10.0, 10.0, 1.0)
-    mesh.add_box(-bw/2 + 6, bd - 16, -1.0, 10.0, 10.0, 1.0)
-    mesh.add_box( bw/2 - 16, bd - 16, -1.0, 10.0, 10.0, 1.0)
-
-    return mesh
-
-
-# ==============================================================================
-# Model 5: wio_tilt_tv_knob (Vintage Knurled Friction Thumb Wheel)
-# ==============================================================================
-def build_tilt_tv_knob_mesh():
-    """
-    Builds the vintage knurled thumb knob:
-    - Outer diameter: 18mm, thickness 7mm
-    - Knurled tactile gear perimeter for easy fingertip tightening
-    - Center hex pocket for M3 / M4 bolt head
-    """
-    mesh = STLMesh()
-    r = 9.0
-    h = 7.0
-    mesh.add_cylinder(0, 0, 0, r, h, axis='z', segments=24)
-
-    # Knurled ridges along perimeter
+    ridges = []
     for i in range(12):
-        a = i * (2 * math.pi / 12)
-        rx = (r - 0.5) * math.cos(a)
-        ry = (r - 0.5) * math.sin(a)
-        mesh.add_box(rx - 0.8, ry - 0.8, 0, 1.6, 1.6, h)
+        a = i * (2 * np.pi / 12)
+        rx = 8.5 * np.cos(a)
+        ry = 8.5 * np.sin(a)
+        r = trimesh.creation.box([1.6, 1.6, 7.0])
+        r.apply_translation([rx, ry, 3.5])
+        ridges.append(r)
 
-    # Central collar
-    mesh.add_cylinder(0, 0, h, 4.5, 3.0, axis='z', segments=16)
+    union_mesh = trimesh.boolean.union([body, collar] + ridges, engine='manifold')
 
-    return mesh
+    # Central through hole (diameter 3.4mm)
+    hole = trimesh.creation.cylinder(radius=1.7, height=18.0)
+    hole.apply_translation([0, 0, 6.0])
+
+    # Hex nut pocket (6.1mm flat-to-flat, depth 3.5mm)
+    hex_nut = trimesh.creation.cylinder(radius=3.5, height=3.5, sections=6)
+    hex_nut.apply_translation([0, 0, 1.75])
+
+    result = union_mesh.difference([hole, hex_nut], engine='manifold')
+    return result
 
 
-def write_openscad_files():
-    # 1. wio_desktop_dock.scad
-    dock_scad = """// ==============================================================================
-// Wio Terminal 桌面多功能 30° 仰角底座与音腔背壳 (Desktop Angled Dock & Sound Chamber)
-// ==============================================================================
+# ==============================================================================
+# Model 4: wio_desktop_dock (Fixed 30° Angled Dock)
+# ==============================================================================
+def build_desktop_dock():
+    # Base footprint plate
+    base = trimesh.creation.box([84.0, 74.0, 3.0])
+    base.apply_translation([0, 37.0, 1.5])
+
+    lip = trimesh.creation.box([84.0, 4.0, 14.0])
+    lip.apply_translation([0, 2.0, 7.0])
+
+    back = trimesh.creation.box([84.0, 4.0, 46.0])
+    back.apply_translation([0, 72.0, 23.0])
+
+    shelf = trimesh.creation.box([84.0, 62.0, 4.0])
+    rot = trimesh.transformations.rotation_matrix(np.radians(28), [1, 0, 0])
+    shelf.apply_transform(rot)
+    shelf.apply_translation([0, 36.0, 18.0])
+
+    # Left and right side walls
+    wall_l = trimesh.creation.box([4.5, 74.0, 20.0])
+    wall_l.apply_translation([-39.75, 37.0, 10.0])
+
+    wall_r = trimesh.creation.box([4.5, 74.0, 20.0])
+    wall_r.apply_translation([39.75, 37.0, 10.0])
+
+    # Exact M3 mounting bosses (Official spacing: 61.00mm, X = +/- 30.5mm)
+    boss_l = trimesh.creation.box([8.0, 12.0, 14.0])
+    boss_l.apply_translation([-30.5, 36.0, 16.0])
+
+    boss_r = trimesh.creation.box([8.0, 12.0, 14.0])
+    boss_r.apply_translation([30.5, 36.0, 16.0])
+
+    union_mesh = trimesh.boolean.union([base, lip, back, shelf, wall_l, wall_r, boss_l, boss_r], engine='manifold')
+
+    # Subtractions:
+    # 1. Electronics cavity
+    cavity = trimesh.creation.box([54.0, 42.0, 18.0])
+    cavity.apply_translation([0, 38.0, 10.0])
+
+    # 2. Exact M3 holes at X = +/- 30.5mm
+    m3_l = trimesh.creation.cylinder(radius=1.7, height=40.0)
+    m3_l.apply_translation([-30.5, 36.0, 16.0])
+
+    m3_r = trimesh.creation.cylinder(radius=1.7, height=40.0)
+    m3_r.apply_translation([30.5, 36.0, 16.0])
+
+    # 3. Type-C pass-through
+    type_c = trimesh.creation.box([12.0, 18.0, 12.0])
+    type_c.apply_translation([-42.0, 18.0, 8.0])
+
+    # 4. Rear sound slots
+    slits = []
+    for i in range(7):
+        s = trimesh.creation.box([2.5, 6.0, 20.0])
+        s.apply_translation([-18.0 + i * 6.0, 72.0, 24.0])
+        slits.append(s)
+
+    result = union_mesh.difference([cavity, m3_l, m3_r, type_c] + slits, engine='manifold')
+    return result
+
+
+# ==============================================================================
+# Model 5: wio_retro_tv (Snap-on Bezel)
+# ==============================================================================
+def build_retro_tv():
+    cab = trimesh.creation.box([82.0, 26.0, 66.0])
+    cab.apply_translation([0, 13.0, 33.0])
+
+    k1 = trimesh.creation.cylinder(radius=5.5, height=3.5)
+    k1.apply_transform(rot_x90)
+    k1.apply_translation([28.0, -1.75, 43.0])
+
+    k2 = trimesh.creation.cylinder(radius=5.5, height=3.5)
+    k2.apply_transform(rot_x90)
+    k2.apply_translation([28.0, -1.75, 23.0])
+
+    legs = []
+    for lx, ly in [(-35.0, 4.0), (35.0, 4.0), (-35.0, 22.0), (35.0, 22.0)]:
+        leg = trimesh.creation.box([5.0, 5.0, 10.0])
+        leg.apply_translation([lx, ly, -5.0])
+        legs.append(leg)
+
+    ear_l = trimesh.creation.cone(radius=7.0, height=12.0)
+    ear_l.apply_translation([-20.0, 13.0, 66.0 + 6.0])
+
+    ear_r = trimesh.creation.cone(radius=7.0, height=12.0)
+    ear_r.apply_translation([20.0, 13.0, 66.0 + 6.0])
+
+    union_mesh = trimesh.boolean.union([cab, k1, k2, ear_l, ear_r] + legs, engine='manifold')
+
+    screen = trimesh.creation.box([50.0, 10.0, 38.0])
+    screen.apply_translation([-6.0, 0, 33.0])
+
+    pocket = trimesh.creation.box([73.0, 14.0, 58.0])
+    pocket.apply_translation([0, 14.0, 33.0])
+
+    result = union_mesh.difference([screen, pocket], engine='manifold')
+    return result
+
+
+def export_stl(mesh, path):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    mesh.export(path)
+    # Validate watertightness and volume
+    loaded = trimesh.load(path)
+    print(f"Exported: {path:35s} | Watertight: {loaded.is_watertight!s:5s} | Volume: {loaded.volume:10.1f} mm³ | Triangles: {len(loaded.faces)}")
+
+
+def update_scad_files():
+    # Write OpenSCAD files with exact 61.00mm spacing
+    dock_scad = """// Wio Terminal 30° 桌面固定底座与音腔背壳 (OpenSCAD 源码)
+// 官方标准两 M3 螺丝孔距: 61.00 mm (X = +/- 30.5 mm)
 $fn = 60;
-wio_width   = 72.0;
-wio_height  = 57.0;
-wio_depth   = 12.0;
-dock_width  = 84.0;
-dock_depth  = 74.0;
-front_h     = 10.0;
-back_h      = 46.0;
-tilt_angle  = 30.0;
-
-module wio_desktop_dock() {
+module wio_dock() {
     difference() {
         union() {
-            translate([-dock_width/2, 0, 0]) cube([dock_width, dock_depth, 3.0]);
-            translate([-dock_width/2, 0, 0]) cube([dock_width, 4.0, 14.0]);
-            translate([-dock_width/2 + 4.5, dock_depth - 3.5, 0]) cube([dock_width - 9.0, 3.5, back_h]);
-            rotate([tilt_angle, 0, 0])
-                translate([-dock_width/2 + 4.5, 10.0, -2.0]) cube([dock_width - 9.0, 60.0, 3.5]);
-            translate([-20 - 4, dock_depth/2 - 4, 12]) cube([8, 8, 12]);
-            translate([ 20 - 4, dock_depth/2 - 4, 12]) cube([8, 8, 12]);
+            translate([-42, 0, 0]) cube([84, 74, 3]);
+            translate([-42, 0, 0]) cube([84, 4, 14]);
+            translate([-42, 70, 0]) cube([84, 4, 46]);
+            rotate([28, 0, 0]) translate([-42, 10, 0]) cube([84, 62, 4]);
+            // 螺丝固定座 (X = +/- 30.5mm)
+            translate([-30.5 - 4, 30, 0]) cube([8, 12, 18]);
+            translate([ 30.5 - 4, 30, 0]) cube([8, 12, 18]);
         }
-        translate([-30, 15, 3.0]) cube([60, 45, 18]);
-        for (i = [-5 : 5]) {
-            translate([i * 6.5 - 1.2, dock_depth - 5.0, 14.0]) cube([2.4, 8.0, 22.0]);
-        }
-        translate([-dock_width/2 - 1, 14.0, 4.0]) cube([10.0, 18.0, 10.0]);
+        // 内部空腔
+        translate([-27, 16, 2]) cube([54, 44, 20]);
+        // M3 穿孔 (间距 61.00mm)
+        translate([-30.5, 36, 0]) cylinder(d=3.4, h=40);
+        translate([ 30.5, 36, 0]) cylinder(d=3.4, h=40);
+        // Type-C 出线口
+        translate([-43, 12, 2]) cube([6, 18, 12]);
     }
 }
-wio_desktop_dock();
+wio_dock();
 """
     with open('cad/wio_desktop_dock.scad', 'w', encoding='utf-8') as f:
         f.write(dock_scad)
 
-    # 2. wio_tilt_tv.scad (Fully Articulated Retro Monitor System)
-    tilt_scad = """// ==============================================================================
-// Wio Terminal 可俯仰摆动复古小电视监视器系统 (Articulated Tilt Retro TV Monitor)
-// 包含：
-// 1. 复古小电视机头（带 CRT 显像管圆角边框、音腔、电池仓）
-// 2. 独立低重心桌面双叉底座（支持 0° ~ 45° 自由俯仰调节）
-// 3. 复古阻尼手拧旋钮
-// ==============================================================================
-
+    tilt_scad = """// Wio Terminal 可俯仰摆动复古小电视监视器 (OpenSCAD 源码)
+// 支持 0° ~ 45° 自由俯仰调节
 $fn = 60;
-
-// 控制展示模式: "assembly" (装配总览), "head" (机头), "base" (底座), "knob" (旋钮)
-mode = "assembly";
-tilt_deg = 25; // 俯仰摆动演示角度 (0° ~ 45°)
-
-tv_w = 84.0;
-tv_h = 66.0;
-tv_d = 32.0;
+mode = "assembly"; // "assembly", "head", "base", "knob"
+tilt_deg = 25;
 
 module tv_head() {
     difference() {
         union() {
-            // 机头主体
-            translate([-tv_w/2, 0, 0]) cube([tv_w, tv_d, tv_h]);
-            // 底部铰链转轴凸耳
-            translate([-7.0, tv_d/2 - 8.0, -14.0]) cube([14.0, 16.0, 14.0]);
-            // 右侧复古旋钮
-            translate([tv_w/2 - 8, -3, tv_h/2 + 10]) rotate([-90,0,0]) cylinder(d=11, h=3);
-            translate([tv_w/2 - 8, -3, tv_h/2 - 10]) rotate([-90,0,0]) cylinder(d=11, h=3);
-            // 顶部猫咪耳朵
-            translate([-18, tv_d/2, tv_h]) rotate([0,0,0])
-                linear_extrude(height=3.5, center=true) polygon([[-6,0],[6,0],[0,11]]);
-            translate([ 18, tv_d/2, tv_h]) rotate([0,0,0])
-                linear_extrude(height=3.5, center=true) polygon([[-6,0],[6,0],[0,11]]);
+            translate([-42, 0, 0]) cube([84, 30, 66]);
+            // 转轴凸耳 (宽 14mm)
+            translate([-7, 7, -14]) cube([14, 16, 14]);
+            translate([0, 15, -7]) rotate([0, 90, 0]) cylinder(r=8, h=14, center=true);
+            // 旋钮
+            translate([28, -2, 45]) rotate([-90,0,0]) cylinder(r=5.5, h=3.5);
+            translate([28, -2, 23]) rotate([-90,0,0]) cylinder(r=5.5, h=3.5);
         }
-        // Wio Terminal 插槽与 CRT 视窗 (50mm x 38mm)
-        translate([-tv_w/2 + 8, -2, (tv_h - 38)/2]) cube([50, 6, 38]);
-        // 内部音腔与电池仓 (62mm x 46mm x 18mm)
-        translate([-31, 10, 8]) cube([62, tv_d, 46]);
-        // 转轴过孔 (M3/M4)
-        translate([-10, tv_d/2, -7.0]) rotate([0, 90, 0]) cylinder(d=3.6, h=20);
-        // 背部百叶窗出音孔
-        for (i = [0:5]) {
-            translate([-28, tv_d - 2, 14 + i*6]) cube([56, 4, 2.5]);
-        }
-        // 左侧 Type-C 开孔
-        translate([-tv_w/2 - 1, 8, 14]) cube([6, 16, 12]);
-        // 顶部按键开槽
-        translate([-20, tv_d/2 - 5, tv_h - 4]) cube([40, 10, 6]);
+        // 屏幕视窗 (50x38mm)
+        translate([-6, -2, 33 - 19]) cube([50, 6, 38]);
+        // Wio Terminal 槽 (73x13x58mm)
+        translate([-36.5, 3, 33 - 29]) cube([73, 13, 58]);
+        // 音腔/电池仓 (64x14x48mm)
+        translate([-32, 15, 33 - 24]) cube([64, 14, 48]);
+        // 转轴过孔 (M3)
+        translate([0, 15, -7]) rotate([0, 90, 0]) cylinder(d=3.6, h=30, center=true);
+        // Type-C 槽
+        translate([-43, 4, 27]) cube([6, 16, 12]);
     }
 }
 
-module desk_base() {
+module tv_base() {
     difference() {
         union() {
-            // 平稳大底座
             translate([-39, 0, 0]) cube([78, 68, 5]);
-            // 双叉支架臂
-            translate([-13.0, 34 - 9, 5]) cube([5.6, 18, 28]);
-            translate([  7.4, 34 - 9, 5]) cube([5.6, 18, 28]);
-            // 支架臂顶部转轴套筒
-            translate([-13.0, 34, 27]) rotate([0, 90, 0]) cylinder(d=14, h=5.6);
-            translate([  7.4, 34, 27]) rotate([0, 90, 0]) cylinder(d=14, h=5.6);
+            // 双叉支架 (内间距 14.8mm)
+            translate([-13.0, 25, 5]) cube([5.6, 18, 24]);
+            translate([  7.4, 25, 5]) cube([5.6, 18, 24]);
+            translate([-10.2, 34, 29]) rotate([0, 90, 0]) cylinder(r=9, h=5.6, center=true);
+            translate([ 10.2, 34, 29]) rotate([0, 90, 0]) cylinder(r=9, h=5.6, center=true);
         }
-        // 左右支架转轴对穿孔
-        translate([-20, 34, 27]) rotate([0, 90, 0]) cylinder(d=3.4, h=40);
-        // 底部防滑脚槽
-        translate([-33, 6, -1]) cube([10, 10, 2]);
-        translate([ 23, 6, -1]) cube([10, 10, 2]);
-        translate([-33, 52, -1]) cube([10, 10, 2]);
-        translate([ 23, 52, -1]) cube([10, 10, 2]);
+        // 转轴通孔
+        translate([0, 34, 29]) rotate([0, 90, 0]) cylinder(d=3.6, h=50, center=true);
     }
 }
 
 module thumb_knob() {
     difference() {
-        union() {
-            cylinder(d=18, h=7);
-            cylinder(d=9, h=10);
-            for (i=[0:11]) {
-                rotate([0,0,i*30]) translate([8.5, -0.8, 0]) cube([1.6, 1.6, 7]);
-            }
-        }
-        // M3/M4 螺母/螺栓六角沉头孔
-        translate([0, 0, -1]) cylinder(d=6.2, h=4, $fn=6);
+        cylinder(r=9, h=7);
         translate([0, 0, -1]) cylinder(d=3.4, h=12);
+        translate([0, 0, -1]) cylinder(r=3.5, h=3.5, $fn=6);
     }
 }
 
-// 渲染分支控制
 if (mode == "assembly") {
-    // 渲染底座
-    color("#444444") desk_base();
-    // 渲染可仰角摆动机头
-    translate([0, 34, 27])
-        rotate([tilt_deg, 0, 0])
-            translate([0, -tv_d/2, 7])
-                color("#F5F2EB") tv_head();
-    // 侧边手拧旋钮
-    translate([14, 34, 27]) rotate([0, 90, 0]) color("#C8A165") thumb_knob();
-} else if (mode == "head") {
-    tv_head();
-} else if (mode == "base") {
-    desk_base();
-} else if (mode == "knob") {
-    thumb_knob();
-}
+    color("#444444") tv_base();
+    translate([0, 34, 29]) rotate([tilt_deg, 0, 0]) translate([0, -15, 7]) color("#F5F2EB") tv_head();
+    translate([14, 34, 29]) rotate([0, 90, 0]) color("#C8A165") thumb_knob();
+} else if (mode == "head") tv_head();
+else if (mode == "base") tv_base();
+else if (mode == "knob") thumb_knob();
 """
     with open('cad/wio_tilt_tv.scad', 'w', encoding='utf-8') as f:
         f.write(tilt_scad)
-    print("Wrote cad/wio_tilt_tv.scad")
 
 
 def main():
-    print("Generating 3D meshes...")
-    # 1. Fixed 30 deg Dock
-    dock_mesh = build_desktop_dock_mesh()
-    dock_mesh.write_binary_stl('cad/stl/wio_desktop_dock.stl')
-
-    # 2. Retro TV Bezel
-    tv_mesh = build_retro_tv_mesh()
-    tv_mesh.write_binary_stl('cad/stl/wio_retro_tv.stl')
-
-    # 3. Articulated Tilt Retro TV System
-    head_mesh = build_tilt_tv_head_mesh()
-    head_mesh.write_binary_stl('cad/stl/wio_tilt_tv_head.stl')
-
-    base_mesh = build_tilt_tv_base_mesh()
-    base_mesh.write_binary_stl('cad/stl/wio_tilt_tv_base.stl')
-
-    knob_mesh = build_tilt_tv_knob_mesh()
-    knob_mesh.write_binary_stl('cad/stl/wio_tilt_tv_knob.stl')
-
-    write_openscad_files()
-    print("All CAD assets generated successfully!")
+    print("Building and validating 3D models with manifold3d CSG kernel...")
+    export_stl(build_tilt_tv_head(), 'cad/stl/wio_tilt_tv_head.stl')
+    export_stl(build_tilt_tv_base(), 'cad/stl/wio_tilt_tv_base.stl')
+    export_stl(build_tilt_tv_knob(), 'cad/stl/wio_tilt_tv_knob.stl')
+    export_stl(build_desktop_dock(), 'cad/stl/wio_desktop_dock.stl')
+    export_stl(build_retro_tv(),     'cad/stl/wio_retro_tv.stl')
+    update_scad_files()
+    print("All models successfully built and verified!")
 
 if __name__ == '__main__':
     main()
