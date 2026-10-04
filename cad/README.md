@@ -9,19 +9,17 @@
 ```text
 cad/
 ├── stl/
-│   ├── wio_tilt_tv_plate.stl  # 【⭐最省钱·一盘出】机头+底座+旋钮合盘文件 (单文件上传，免除多份起步费，仅75g)
-│   ├── wio_tilt_tv_head.stl   # 【分件】轻量化可摆动机头：复古小电视监视器（含音腔/电池仓/CRT边框，51g）
-│   ├── wio_tilt_tv_base.stl   # 【分件】轻量化双叉俯仰底座：带加强筋减重槽，0°~45° 无级摆动（21g）
-│   ├── wio_tilt_tv_knob.stl   # 【分件】复古阻尼手拧旋钮：免工具随手锁紧/调节角度（2g）
-│   ├── wio_desktop_dock.stl   # 【经典】30° 固定黄金仰角桌面底座与音腔背壳（M3孔距=61mm）
-│   └── wio_retro_tv.stl       # 【复古】一体式 CRT 小电视 / 猫咪外壳
-├── official/                  # Seeed Studio 官方图纸
-│   ├── Wio-Terminal-Front-72x57x10.4mm.dxf
-│   ├── Wio-Terminal-Back-72x57x7.1mm.dxf
-│   └── Wio-Terminal-Chassis-Battery.dxf
-├── wio_tilt_tv.scad           # 可俯仰小电视 OpenSCAD 参数化源码（支持装配演示与单件切片）
-├── wio_desktop_dock.scad      # 固定底座 OpenSCAD 参数化源码
-└── README.md                  # 本说明文档
+│   ├── wio_tilt_tv_head.stl       # 【机头】轻量化可俯仰复古小电视机头（后背直插导轨，35.9g）
+│   ├── wio_tilt_tv_base.stl       # 【底座】轻量化双叉俯仰底座（带M3防旋卡槽，18.3g）
+│   ├── wio_tilt_tv_knob.stl       # 【旋钮】复古阻尼手拧旋钮（2.1g）
+│   └── jlc_free/                  # 【嘉立创 0 元免费打样专区（严格≤70cm³，各1壳体）】
+│       ├── 01_jlc_tilt_tv_head.stl  # 【款 1】机头（31.19 cm³）
+│       ├── 02_jlc_tilt_tv_base.stl  # 【款 2】底座（15.95 cm³）
+│       └── 03_jlc_tilt_tv_knob.stl  # 【款 3 选配】阻尼旋钮（1.83 cm³）
+├── official/                      # Seeed Studio 官方图纸
+├── tilt_tv_product_preview.svg    # 1:1 矢量工程尺寸图与 3D 成品效果预览
+├── JLC_FREE_GUIDE.md              # 嘉立创 0 元包邮实操下单指南
+└── README.md                      # 本说明文档
 ```
 
 ---

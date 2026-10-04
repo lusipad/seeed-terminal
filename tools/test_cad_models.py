@@ -10,13 +10,9 @@ def run_tests():
         'cad/stl/wio_tilt_tv_head.stl',
         'cad/stl/wio_tilt_tv_base.stl',
         'cad/stl/wio_tilt_tv_knob.stl',
-        'cad/stl/wio_tilt_tv_plate.stl',
-        'cad/stl/wio_desktop_dock.stl',
-        'cad/stl/wio_retro_tv.stl',
         'cad/stl/jlc_free/01_jlc_tilt_tv_head.stl',
         'cad/stl/jlc_free/02_jlc_tilt_tv_base.stl',
-        'cad/stl/jlc_free/03_jlc_tilt_tv_knob.stl',
-        'cad/stl/jlc_free/04_jlc_unibody_dock.stl'
+        'cad/stl/jlc_free/03_jlc_tilt_tv_knob.stl'
     ]
 
     all_passed = True
