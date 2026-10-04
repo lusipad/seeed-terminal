@@ -700,13 +700,14 @@ void loop() {
         lastInteract = millis();
         setBacklightPower(true);
         lastPageBeforeVoice = curPage;
+        beep(988, 50);
+        delay(55);  // 等蜂鸣音彻底播完再开麦,杜绝麦克风采集到蜂鸣声造成误触发
         wioRecStart();
         petSetState(ST_RECORD);
         stateStart = millis();
         drawPet(F_LISTEN);
-        drawBubbleText("在听…说完我会自己停", TFT_BLACK, "", TFT_BLACK);
+        drawBubbleText("在听…说完我会自己停", TFT_BLACK, "也可再按 B 立即发送 / C 取消", TFT_BLACK);
         petAnimSet(A_LISTEN);
-        beep(988, 60);
         break;
       }
 
@@ -774,10 +775,36 @@ void loop() {
 
     case ST_RECORD: {
       uint32_t samples = 0, hint = 0;
+
+      // 1. 按键干预：
+      // - 录音超 200ms 后按 C 键：取消本次录音，快速返回待机
+      // - 录音超 200ms 后按 B 键：提前结束说话，手动立即送入思考
+      if (millis() - stateStart > 200) {
+        if (pressed(PIN_KEY_C)) {
+          wioRecPoll(samples, hint);  // 关麦清理
+          beep(440, 60);
+          enterIdle();
+          break;
+        }
+        if (pressed(PIN_KEY_B)) {
+          wioRecPoll(samples, hint);  // 关麦清理
+          recSamples = (samples > 1600) ? samples : 1600;
+          recBufferFull = false;
+          beep(880, 50);
+          petSetState(ST_THINK);
+          stateStart = millis();
+          drawPet(F_THINK);
+          drawBubbleText("让我想想…", TFT_BLACK, "", TFT_BLACK);
+          petAnimSet(A_THINK);
+          break;
+        }
+      }
+
+      // 2. 底层 VAD 自动判停
       const int st = wioRecPoll(samples, hint);
       if (st == 2) {  // 超时没说话
         beep(196, 250);
-        enterShow(F_SAD, "你还没说话呢~", TFT_BLACK, "按一下 B 再开口就好", 15000);
+        enterShow(F_SAD, "你还没说话呢~", TFT_BLACK, "按一下 B 再开口就好", 3000);
         break;
       }
       if (st == 1 || st == 3) {  // 录完: 1=正常说完截断, 3=录满3秒强行截断
@@ -792,6 +819,26 @@ void loop() {
         drawPet(F_THINK);
         drawBubbleText("让我想想…", TFT_BLACK, "", TFT_BLACK);
         petAnimSet(A_THINK);
+        break;
+      }
+
+      // 3. 硬件/环境硬看门狗：录音最长决不允许超过 4.0 秒，杜绝任何卡死
+      if (millis() - stateStart > 4000) {
+        wioRecPoll(samples, hint);  // 停止底层录音
+        if (samples > 3200) {
+          recSamples = samples;
+          recBufferFull = true;
+          beep(880, 50);
+          petSetState(ST_THINK);
+          stateStart = millis();
+          drawPet(F_THINK);
+          drawBubbleText("让我想想…", TFT_BLACK, "", TFT_BLACK);
+          petAnimSet(A_THINK);
+        } else {
+          beep(196, 250);
+          enterShow(F_SAD, "你还没说话呢~", TFT_BLACK, "按一下 B 再开口就好", 3000);
+        }
+        break;
       }
       break;
     }
