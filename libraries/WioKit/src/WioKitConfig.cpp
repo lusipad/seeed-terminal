@@ -10,9 +10,9 @@ static const uint32_t WIO_CONFIG_ADDR  = 0x003FF000;       // 4MB Flash 最后�
 static DNSServer* pDnsServer = nullptr;
 static WebServer* pWebServer = nullptr;
 static bool portalSaved = false;
+static bool portalExit = false;
 static WioConfig portalResultCfg;
 static WioConfig currentPresetCfg;
-static String cachedScanOptions = "";
 
 static uint32_t calcChecksum(const WioConfig& cfg) {
   const uint8_t* p = (const uint8_t*)&cfg;
@@ -91,23 +91,22 @@ static void handlePortalRoot() {
                   "h2{margin:0 0 4px;font-size:20px;color:#d85a00;text-align:center;}"
                   "p.sub{margin:0 0 18px;font-size:12px;color:#888;text-align:center;}"
                   "label{display:block;font-size:13px;font-weight:bold;margin:12px 0 4px;color:#555;}"
-                  "input,select{width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #ddd;border-radius:10px;font-size:14px;outline:none;background:#fafafa;}"
-                  "input:focus,select:focus{border-color:#ff9800;background:#fff;}"
+                  "input{width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #ddd;border-radius:10px;font-size:14px;outline:none;background:#fafafa;}"
+                  "input:focus{border-color:#ff9800;background:#fff;}"
                   "details{margin-top:16px;background:#fdfdfd;border:1px dashed #ccc;border-radius:10px;padding:10px;}"
                   "summary{font-size:13px;color:#777;cursor:pointer;font-weight:bold;}"
                   "button{width:100%;margin-top:22px;padding:12px;background:linear-gradient(135deg,#ff9800,#f57c00);color:#fff;border:none;border-radius:12px;font-size:16px;font-weight:bold;cursor:pointer;box-shadow:0 4px 12px rgba(245,124,0,0.3);}"
                   "button:active{transform:scale(0.98);}"
+                  ".exit-btn{display:block;text-align:center;margin-top:16px;color:#999;font-size:13px;text-decoration:none;padding:6px;}"
                   ".tip{font-size:11px;color:#aaa;margin-top:4px;}"
                   "</style></head><body><div class='card'>"
                   "<h2>🐱 小维桌宠配网</h2>"
-                  "<p class='sub'>设置 WiFi 与小维常驻城市</p>"
+                  "<p class='sub'>设置 WiFi 与常驻城市</p>"
                   "<form action='/save' method='POST'>");
 
-  html += F("<label>WiFi 名称 (SSID)</label>");
-  html += F("<select name='ssid_sel' onchange='if(this.value===\"__custom__\"){document.getElementById(\"c_ssid\").style.display=\"block\";document.getElementById(\"c_ssid\").value=\"\";}else{document.getElementById(\"c_ssid\").style.display=\"none\";document.getElementById(\"c_ssid\").value=this.value;}'>");
-  html += cachedScanOptions;
-  html += F("<option value='__custom__'>➕ 手动输入其它网络...</option></select>");
-  html += F("<input type='text' id='c_ssid' name='ssid_custom' style='display:none;margin-top:6px;' placeholder='输入 WiFi 名称'>");
+  html += F("<label>WiFi 名称 (SSID)</label><input type='text' name='ssid' value='");
+  html += currentPresetCfg.ssid;
+  html += F("' placeholder='输入要连接的 WiFi 名称' required>");
 
   html += F("<label>WiFi 密码</label><input type='password' name='pass' placeholder='无密码可留空'>");
 
@@ -121,17 +120,28 @@ static void handlePortalRoot() {
             "<label>Baidu Secret Key</label><input type='password' name='bd_sec' placeholder='留空保留原配置'>"
             "<div class='tip'>如未变更密钥，留空即可继续使用预置 Key</div></details>");
 
-  html += F("<button type='submit'>💾 保存并连接</button></form></div>"
-            "<script>var s=document.querySelector('select');if(s&&s.value!=='__custom__'){document.getElementById('c_ssid').value=s.value;}</script>"
-            "</body></html>");
+  html += F("<button type='submit'>💾 保存并连接</button>"
+            "<a href='/exit' class='exit-btn'>❌ 退出配网模式</a>"
+            "</form></div></body></html>");
 
   pWebServer->send(200, "text/html", html);
 }
 
+static void handlePortalExit() {
+  portalExit = true;
+  pWebServer->send(200, "text/html",
+                   F("<!DOCTYPE html><html><head><meta charset='utf-8'>"
+                     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+                     "<title>已退出</title><style>"
+                     "body{font-family:sans-serif;background:#fff5ea;color:#d85a00;display:flex;justify-content:center;align-items:center;height:90vh;margin:0;}"
+                     ".box{background:#fff;padding:30px;border-radius:16px;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,0.1);max-width:320px;}"
+                     "</style></head><body><div class='box'>"
+                     "<h3>已退出配网模式</h3><p style='color:#666;'>小维已恢复正常待机，你可以关闭此网页啦~</p>"
+                     "</div></body></html>"));
+}
+
 static void handlePortalSave() {
-  String ssid = pWebServer->arg("ssid_custom");
-  if (!ssid.length()) ssid = pWebServer->arg("ssid_sel");
-  if (ssid == "__custom__") ssid = "";
+  String ssid = pWebServer->arg("ssid");
   ssid.trim();
 
   String pass = pWebServer->arg("pass");
@@ -198,22 +208,11 @@ static void handlePortalNotFound() {
 
 bool wioPortalBegin(const char* apSsid, const WioConfig& curCfg) {
   portalSaved = false;
+  portalExit = false;
   currentPresetCfg = curCfg;
 
-  WiFi.mode(WIFI_AP_STA);
-  // 扫描附近 WiFi
-  cachedScanOptions = "";
-  int n = WiFi.scanNetworks();
-  if (n > 0) {
-    for (int i = 0; i < n; i++) {
-      String s = WiFi.SSID(i);
-      if (s.length()) {
-        cachedScanOptions += "<option value='" + s + "'";
-        if (s == curCfg.ssid) cachedScanOptions += " selected";
-        cachedScanOptions += ">" + s + " (" + String(WiFi.RSSI(i)) + "dBm)</option>";
-      }
-    }
-  }
+  WiFi.disconnect();
+  delay(100);
 
   WiFi.mode(WIFI_AP);
   if (!WiFi.softAP(apSsid)) {
@@ -230,6 +229,7 @@ bool wioPortalBegin(const char* apSsid, const WioConfig& curCfg) {
   pWebServer = new WebServer(80);
   pWebServer->on("/", HTTP_GET, handlePortalRoot);
   pWebServer->on("/save", HTTP_POST, handlePortalSave);
+  pWebServer->on("/exit", HTTP_GET, handlePortalExit);
   pWebServer->on("/generate_204", handlePortalRoot);       // Android Captive Portal
   pWebServer->on("/hotspot-detect.html", handlePortalRoot); // iOS Captive Portal
   pWebServer->onNotFound(handlePortalNotFound);
@@ -244,6 +244,9 @@ int wioPortalPoll(WioConfig& outCfg) {
   if (portalSaved) {
     outCfg = portalResultCfg;
     return 1;
+  }
+  if (portalExit) {
+    return 2;
   }
   return 0;
 }

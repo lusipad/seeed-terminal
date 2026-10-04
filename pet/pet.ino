@@ -244,7 +244,11 @@ void enterConfig() {
   drawBubbleText("手机连接热点: Wio-Pet", TFT_BLACK, "打开网页 192.168.4.1", TFT_BLACK);
   drawTextCJK("手机完成配置 | 按 B 退出", 64, 218, 320, TFT_LIGHTGREY, C_BOTTOM_BG);
   petAnimSet(A_LISTEN);
-  wioPortalBegin("Wio-Pet", activeConfig);
+  if (!wioPortalBegin("Wio-Pet", activeConfig)) {
+    Serial.println("V: portal start failed");
+    wioPortalEnd();
+    enterIdle();
+  }
 }
 
 void enterIdle() {
@@ -508,7 +512,7 @@ void loop() {
         enterIdle();
         break;
       }
-      if (pressed(PIN_KEY_B)) {  // B 键退出配网
+      if (st == 2 || pressed(PIN_KEY_B)) {  // 手机网页点击退出 或 B 键退出配网
         beep(880, 80);
         wioPortalEnd();
         enterIdle();
@@ -518,3 +522,4 @@ void loop() {
     }
   }
 }
+
