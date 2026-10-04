@@ -4,10 +4,10 @@ Uses manifold3d CSG engine to guarantee 100% watertight, manifold, volume-valid 
 Optimized for 9600 High-Toughness Resin with structural lightweighting & combo plate.
 
 Models generated:
-1. cad/stl/wio_tilt_tv_head.stl  - Lightweight Retro CRT Monitor Head
-2. cad/stl/wio_tilt_tv_base.stl  - Rib-Reinforced Clevis Desk Stand (0°~45° tilt)
-3. cad/stl/wio_tilt_tv_knob.stl  - Knurled Friction Thumb Knob
-4. cad/stl/wio_tilt_tv_plate.stl - COMBO PLATE (All 3 parts in 1 STL to save minimum order fees)
+1. cad/stl/wio_tilt_tv_head.stl  - Lightweight Retro CRT Monitor Head (~51g)
+2. cad/stl/wio_tilt_tv_base.stl  - Rock-Solid Extended-Footing Clevis Base (~23g)
+3. cad/stl/wio_tilt_tv_knob.stl  - Knurled Friction Thumb Knob (~2g)
+4. cad/stl/wio_tilt_tv_plate.stl - COMBO PLATE (All 3 parts in 1 STL, ~76g total)
 5. cad/stl/wio_desktop_dock.stl  - Fixed 30° Angled Desktop Stand (M3 spacing = 61.00mm)
 6. cad/stl/wio_retro_tv.stl      - Retro Mini-TV Snap Bezel
 """
@@ -51,37 +51,29 @@ def build_tilt_tv_head():
     union_mesh = trimesh.boolean.union([cab, lug, lug_cyl, k1, k2, ear_l, ear_r], engine='manifold')
 
     # Subtractions:
-    # Screen window (50x38mm)
     screen = trimesh.creation.box([50.0, 8.0, 38.0])
     screen.apply_translation([-5.0, 0, 32.0])
 
-    # Wio Terminal pocket (73x13x58mm)
     pocket = trimesh.creation.box([73.0, 13.0, 58.0])
     pocket.apply_translation([0, 8.5, 32.0])
 
-    # Rear hollow chamber with 2.2mm optimized wall thickness
     chamber = trimesh.creation.box([70.0, 10.0, 54.0])
     chamber.apply_translation([0, 19.0, 32.0])
 
-    # Pivot hole (diameter 3.6mm)
     pivot_hole = trimesh.creation.cylinder(radius=1.8, height=30.0)
     pivot_hole.apply_transform(rot_y90)
     pivot_hole.apply_translation([0, 13.0, -7.0])
 
-    # Top button cutout
     top_btns = trimesh.creation.box([42.0, 8.0, 8.0])
     top_btns.apply_translation([-5.0, 8.5, 64.0])
 
-    # Left Type-C cutout
     type_c = trimesh.creation.box([8.0, 14.0, 10.0])
     type_c.apply_translation([-41.0, 8.5, 32.0])
 
-    # Front joystick opening (diameter 15mm)
     joystick = trimesh.creation.cylinder(radius=7.5, height=8.0)
     joystick.apply_transform(rot_x90)
     joystick.apply_translation([25.0, 0, 17.0])
 
-    # Rear sound slots
     slits = []
     for i in range(5):
         s = trimesh.creation.box([48.0, 6.0, 2.2])
@@ -94,41 +86,61 @@ def build_tilt_tv_head():
 
 
 # ==============================================================================
-# Model 2: wio_tilt_tv_base (Lightweight Ribbed Clevis Desk Stand ~21g)
+# Model 2: wio_tilt_tv_base (Rock-Solid Extended Footing Desk Stand ~23g)
 # ==============================================================================
 def build_tilt_tv_base():
-    plate = trimesh.creation.box([74.0, 64.0, 4.5])
-    plate.apply_translation([0, 32.0, 2.25])
+    # Extended footprint: 76mm wide x 72mm deep x 4.5mm thick (Y from -30mm to +42mm)
+    plate = trimesh.creation.box([76.0, 72.0, 4.5])
+    plate.apply_translation([0, 6.0, 2.25])
 
+    # Upright clevis support arms
     arm_l = trimesh.creation.box([5.0, 16.0, 22.0])
-    arm_l.apply_translation([-9.7, 32.0, 15.5])
+    arm_l.apply_translation([-9.7, 0, 15.5])
     arm_l_top = trimesh.creation.cylinder(radius=8.0, height=5.0)
     arm_l_top.apply_transform(rot_y90)
-    arm_l_top.apply_translation([-9.7, 32.0, 26.5])
+    arm_l_top.apply_translation([-9.7, 0, 26.5])
 
     arm_r = trimesh.creation.box([5.0, 16.0, 22.0])
-    arm_r.apply_translation([9.7, 32.0, 15.5])
+    arm_r.apply_translation([9.7, 0, 15.5])
     arm_r_top = trimesh.creation.cylinder(radius=8.0, height=5.0)
     arm_r_top.apply_transform(rot_y90)
-    arm_r_top.apply_translation([9.7, 32.0, 26.5])
+    arm_r_top.apply_translation([9.7, 0, 26.5])
 
     union_mesh = trimesh.boolean.union([plate, arm_l, arm_l_top, arm_r, arm_r_top], engine='manifold')
 
-    # Pivot hole (diameter 3.6mm)
+    # Subtractions:
+    # 1. Pivot hole: 3.6mm diameter through both arms at Y=0, Z=26.5
     pivot_hole = trimesh.creation.cylinder(radius=1.8, height=40.0)
     pivot_hole.apply_transform(rot_y90)
-    pivot_hole.apply_translation([0, 32.0, 26.5])
+    pivot_hole.apply_translation([0, 0, 26.5])
 
-    # Bottom weight-reduction pocket with cross-truss reinforcing ribs
-    pocket = trimesh.creation.box([62.0, 52.0, 2.5])
-    pocket.apply_translation([0, 32.0, 1.25])
-    rib_x = trimesh.creation.box([62.0, 4.0, 2.5])
-    rib_x.apply_translation([0, 32.0, 1.25])
-    rib_y = trimesh.creation.box([4.0, 52.0, 2.5])
-    rib_y.apply_translation([0, 32.0, 1.25])
+    # 2. Bottom weight-reduction pocket with cross ribs
+    pocket = trimesh.creation.box([64.0, 60.0, 2.5])
+    pocket.apply_translation([0, 6.0, 1.25])
+    rib_x = trimesh.creation.box([64.0, 4.0, 2.5])
+    rib_x.apply_translation([0, 6.0, 1.25])
+    rib_y = trimesh.creation.box([4.0, 60.0, 2.5])
+    rib_y.apply_translation([0, 6.0, 1.25])
     pocket_sub = pocket.difference([rib_x, rib_y], engine='manifold')
 
-    result = union_mesh.difference([pivot_hole, pocket_sub], engine='manifold')
+    # 3. 4 Optional 1-Yuan Coin Ballast Wells (diameter 25.5mm, depth 2.2mm)
+    c1 = trimesh.creation.cylinder(radius=12.75, height=2.2)
+    c1.apply_translation([-17.0, -10.0, 1.1])
+    c2 = trimesh.creation.cylinder(radius=12.75, height=2.2)
+    c2.apply_translation([ 17.0, -10.0, 1.1])
+    c3 = trimesh.creation.cylinder(radius=12.75, height=2.2)
+    c3.apply_translation([-17.0,  22.0, 1.1])
+    c4 = trimesh.creation.cylinder(radius=12.75, height=2.2)
+    c4.apply_translation([ 17.0,  22.0, 1.1])
+
+    # 4. Anti-slip rubber foot corner indentations (4 corners)
+    feet = []
+    for fx, fy in [(-32.0, -24.0), (32.0, -24.0), (-32.0, 36.0), (32.0, 36.0)]:
+        f = trimesh.creation.box([8.0, 8.0, 1.0])
+        f.apply_translation([fx, fy, 0.5])
+        feet.append(f)
+
+    result = union_mesh.difference([pivot_hole, pocket_sub, c1, c2, c3, c4] + feet, engine='manifold')
     return result
 
 
@@ -164,32 +176,26 @@ def build_tilt_tv_knob():
 
 
 # ==============================================================================
-# Model 4: wio_tilt_tv_plate (Single Build Plate Combo STL ~74g total)
+# Model 4: wio_tilt_tv_plate (Single Build Plate Combo STL ~76g total)
 # ==============================================================================
 def build_tilt_tv_combo_plate(head, base, knob):
-    """
-    Arranges head, base, and knob onto one unified printing bed plate
-    connected with micro-breakaway sprues. Uploading this counts as 1 single part!
-    """
     head_c = head.copy()
     base_c = base.copy()
     knob_c = knob.copy()
 
-    # Lay Head flat (front facing up): translate and center
-    # Head size: ~82 x 26 x 64 -> rotate so it lays on its back
+    # Lay Head flat (front facing up)
     rot_lay = trimesh.transformations.rotation_matrix(np.radians(-90), [1, 0, 0])
     head_c.apply_transform(rot_lay)
-    # Align head bottom to Z=0
-    head_c.apply_translation([0, -50.0, -head_c.bounds[0, 2]])
+    head_c.apply_translation([0, -52.0, -head_c.bounds[0, 2]])
 
-    # Base: sits at Z=0, place next to head
-    base_c.apply_translation([0, 45.0, -base_c.bounds[0, 2]])
+    # Base sits flat
+    base_c.apply_translation([0, 48.0, -base_c.bounds[0, 2]])
 
-    # Knob: sits at Z=0, place on side
+    # Knob sits flat
     knob_c.apply_translation([50.0, 0, -knob_c.bounds[0, 2]])
 
-    # Runner sprues (2 small breakable connectors of 1.5mm diameter)
-    sprue1 = trimesh.creation.cylinder(radius=0.9, height=40.0)
+    # Runner sprues (2 breakable connection rods)
+    sprue1 = trimesh.creation.cylinder(radius=0.9, height=45.0)
     rot_y = trimesh.transformations.rotation_matrix(np.radians(90), [1, 0, 0])
     sprue1.apply_transform(rot_y)
     sprue1.apply_translation([0, 0, 2.0])
@@ -227,7 +233,6 @@ def build_desktop_dock():
     wall_r = trimesh.creation.box([4.5, 74.0, 20.0])
     wall_r.apply_translation([39.75, 37.0, 10.0])
 
-    # Exact M3 mounting bosses (Official spacing: 61.00mm, X = +/- 30.5mm)
     boss_l = trimesh.creation.box([8.0, 12.0, 14.0])
     boss_l.apply_translation([-30.5, 36.0, 16.0])
 
@@ -306,7 +311,7 @@ def export_stl(mesh, path):
 
 
 def main():
-    print("Building lightweight 9600-resin optimized 3D models with manifold3d...")
+    print("Building rock-solid 9600-resin optimized 3D models with manifold3d...")
     head = build_tilt_tv_head()
     base = build_tilt_tv_base()
     knob = build_tilt_tv_knob()
