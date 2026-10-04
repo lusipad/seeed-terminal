@@ -22,8 +22,8 @@ PetState state = ST_IDLE;
 #include <WioKitAsrBaidu.h>    // L2 百度 ASR
 #include <WioKitLlmDeepSeek.h> // L2 DeepSeek
 
-// ---- 默认密钥/回退:若本地有 wifi_secrets.h 则用作未配网时的缺省值 ----
-#if __has_include("wifi_secrets.h")
+// ---- 默认密钥/回退:若本地有 wifi_secrets.h 且未指定发布模式则用作开发调试缺省值 ----
+#if __has_include("wifi_secrets.h") && !defined(PET_RELEASE_BUILD)
 #define HAS_COMPILED_SECRETS 1
 #include "wifi_secrets.h"
 #else
