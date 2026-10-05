@@ -1,14 +1,18 @@
-# 小维 XiaoWei · Wio Terminal AI 桌宠
+# 小维 XiaoWei
 
-> 给 Wio Terminal(SAMD51 + 2.4" 彩屏 + WiFi + 板载麦克风)装上性格:
+> 给 Wio Terminal(SAMD51 + 2.4" 彩屏 + WiFi + 板载麦克风)装上性格,再给它一台 3D 打印的复古小电脑当家:
 > **按一下 B 说话,说完自动停 → 百度 ASR 识别 → DeepSeek 回答 → 汉字气泡 + 匹配的表情。**
 > 它还会眨眼、张望、哼歌;被摇晃会晕,摸头会开心,没人理会打哈欠、睡着。
+
+<p align="center">
+  <img src="cad/preview_render.jpg" width="560" alt="小维复古桌面显示器(STL 直接渲染)"/>
+</p>
 
 | 待机 | 开心摸头 | 聆听 | 对话展示 | 沉睡 |
 | :---: | :---: | :---: | :---: | :---: |
 | ![待机](sim/out/01_idle.png) | ![开心](sim/out/02_pet_happy.png) | ![聆听](sim/out/03_listen.png) | ![对话](sim/out/04_reply_1.png) | ![睡觉](sim/out/10_sleep.png) |
 
-> 上图为**宿主模拟器**渲染(`bash sim/build.sh` 或 `sim/build.bat`, Windows/MSVC): 与固件运行完全同一份表情、动画、汉字渲染及像素场景代码。欢迎补充实机照片/GIF 到 `docs/img/`。
+> 外壳图由 `tools/render_preview.py` 直接从 STL 渲染(屏幕内容为示意);屏幕截图为**宿主模拟器**渲染(`bash sim/build.sh` 或 `sim/build.bat`, Windows/MSVC),与固件运行完全同一份表情、动画、汉字渲染及像素场景代码。欢迎补充实机照片/GIF 到 `docs/img/`。
 
 ## 玩法
 
@@ -32,6 +36,65 @@
 - **端侧独立配网与持久化**: 随时按顶部 **A 键** 进入配网模式，Wio Terminal 开启 `Wio-Pet` 热点与 Captive Portal 网页。手机直连访问 `192.168.4.1` 图形化选择 WiFi、设置城市与 API 密钥。配置永久存储在板载 **4MB QSPI Flash**（W25Q32JV）中，平时运行 0 额外 RAM 占用。
 - **连续多轮对答与上下文**: 自动记忆最近 2 轮问答历史（超过 90 秒无互动自动重置），长句停顿容忍放宽至 1.2s，单句录满 3 秒时友好引导。
 - **回答与像素动画**: 回答以情绪标签(`[开心]` `[兴奋]` `[惊讶]` `[害羞]` `[疑惑]` `[难过]`)开头,由系统提示词约定、DeepSeek 生成;标签驱动 14 种高精度像素表情,正文以气泡上屏。录音为 16bit@16kHz DMA 采样 + 高通滤波,上传前做首尾静音裁剪。
+
+## 3D 打印外壳:复古桌面显示器
+
+一台复古 CRT 小显示器坐在"主机盒"上:Wio Terminal 装进显示器,显示器绕背后的铰链 0–45° 后仰,主机盒里预留功放、喇叭、电池和 Grove 模块的位置,正面接口面板可换。全部模型由 `tools/generate_3d_models.py` 参数化生成。
+
+| 正面 | 背面(后仰 25°) | 嘉立创免费版 |
+| :---: | :---: | :---: |
+| ![正面](cad/preview_render.jpg) | ![背面](cad/preview_render_back.jpg) | ![免费版](cad/preview_render_jlc.jpg) |
+
+| | 完整版 | 嘉立创免费打印版 |
+| :--- | :--- | :--- |
+| 文件 | `cad/stl/wio_tilt_tv_*.stl`(6 件) | `cad/stl/jlc_free/`(2 件) |
+| 零件 | 显示器前壳、CRT 后盖、主机盒、底盖、正面面板、阻尼旋钮 | 显示器一体件、主机盒一体件 |
+| 打印体积 | 86.1 cm³(≈99 g,9600 树脂) | 63.99 cm³(≤ 70,满足免费打印限制) |
+| Wio 装入 | 从背后插入,后盖压住 | 从顶部插入,背后导轨夹住 |
+| 扩展 | 可换正面面板;底盖带电池仓、6 根模块柱、防滑垫槽 | 接口直接开在前壁;底部敞开,模块用胶固定 |
+| 阻尼旋钮 | 打印件(内嵌 M3 螺母) | 外购 M3 滚花手拧螺母(外径 ≤ 12mm) |
+
+- **走线**:Wio 底边的 USB-C 和两个 Grove 口正下方开槽,40-Pin 杜邦线从 Wio 背后两侧的孔下去,线缆全部直通主机盒;
+- **主机盒**:左侧喇叭格栅 + 3520 腔体喇叭卡槽,右侧散热槽,正面 USB-C / 2×Grove / 拨动开关 / LED 孔位;
+- **校验**:`tools/test_cad_models.py` 检查每个零件水密、单壳体、≤ 100mm,并像在线检查器那样按 STL 坐标重读、按 0.001/0.01mm 容差合并顶点后不得出现退化面或坏边;`tools/generate_svg_preview.py` 生成 STL 实测图纸,并对 0–45° 每 5° 做干涉求交。
+
+详细说明:[cad/README.md](cad/README.md)(结构、组装顺序)· [cad/JLC_FREE_GUIDE.md](cad/JLC_FREE_GUIDE.md)(免费打印下单)· [cad/tilt_tv_product_preview.svg](cad/tilt_tv_product_preview.svg)(实测图纸 + 校核)
+
+重新生成:`python tools/generate_3d_models.py` → `python tools/generate_svg_preview.py` → `python tools/render_preview.py` → `python tools/test_cad_models.py`
+
+## BOM 物料清单
+
+**核心**
+
+| 物料 | 规格 | 数量 | 说明 |
+| :--- | :--- | :---: | :--- |
+| Wio Terminal | Seeed Studio,ATSAMD51 + RTL8720DN,2.4" 320×240 | 1 | 主机,固件见下方"快速上手" |
+| USB-C 数据线 | 能传数据的线 | 1 | 供电 + 烧录 |
+| 3D 打印外壳 | 完整版 6 件或嘉立创免费版 2 件,推荐 9600 光敏树脂 | 1 套 | 见上一节 |
+
+**外壳五金**
+
+| 物料 | 规格 | 数量 | 说明 |
+| :--- | :--- | :---: | :--- |
+| 铰链螺栓 | M3×25 内六角 | 1 | 螺栓头沉入左叉臂沉孔 |
+| 螺母 | M3 螺母(完整版,压进打印旋钮)或 M3 滚花手拧螺母 ≤ Ø12(免费版) | 1 | 拧紧即可调俯仰阻尼 |
+| 底盖螺丝 | M3×8 沉头自攻 | 4 | 仅完整版 |
+| 模块螺丝 | M2×5 自攻 | 若干 | 固定 Grove 模块 / 功放板(完整版模块柱) |
+| 防滑脚垫 | Ø10 硅胶脚垫 | 4 | 完整版贴底盖垫槽;免费版贴主机盒底边 |
+
+**扩展电子(可选,装进主机盒)**
+
+| 物料 | 规格 | 参考价 | 说明 |
+| :--- | :--- | :---: | :--- |
+| I2S 功放 | MAX98357A(已焊排针) | 5–8 元 | 接 40-Pin,接线见 [cad/README.md](cad/README.md#-max98357a-到-wio-terminal-40-pin-极简免焊接线表) |
+| 腔体喇叭 | 8Ω 2W 3520 | 4–6 元 | 插入主机盒左侧卡槽 |
+| 杜邦线 | 20cm 母对母 × 5–7 | 2–3 元 | 40-Pin → 功放 |
+| USB-C 延长线 | 面板式公转母(弯头更好走线) | 6–10 元 | 把 Wio 底边 USB-C 引到主机盒正面 |
+| Grove 线 | 4pin 20cm | 2–4 元 | 接 Grove 模块或从正面过线口引出 |
+| 拨动开关 / LED | 小型拨动开关、Ø3 LED | 1–2 元 | 正面面板默认孔位 |
+| 锂电池 | 3.7V 603040 / 503040(带保护板) | 10–15 元 | 需另配充电 + 升压 5V 模块才能给 Wio 供电 |
+
+> 参考价为淘宝 / 拼多多常见价位的估计,以实际购买为准。
 
 ## 像素美术与资源架构
 
@@ -99,6 +162,7 @@ pet 的全部硬件能力沉淀在 [libraries/WioKit/](libraries/WioKit/)(标准
 
 ## 文档
 
+- [cad/README.md](cad/README.md) — 3D 打印外壳:结构、组装、扩展预留、接线;[cad/JLC_FREE_GUIDE.md](cad/JLC_FREE_GUIDE.md) — 嘉立创免费打印版
 - [HANDOFF.md](HANDOFF.md) — 开发笔记:软件架构细节、踩坑史(9 条真金白银)、真机验收清单。
   写给下一个接手的人,多半是未来的自己
 - [docs/superpowers/specs/](docs/superpowers/specs/) — 两份设计文档:情绪+提速、WioKit 库化
