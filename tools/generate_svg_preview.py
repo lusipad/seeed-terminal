@@ -6,7 +6,8 @@ Nothing in the drawing is hand-typed geometry:
     split into visible / hidden runs with a z-buffer (hidden-line removal);
   * every dimension value is measured on the mesh (bounding boxes, plane
     sections, ray probes) and printed to stdout for cross-checking;
-  * the assembly pose uses the pivot axes measured on head and base.
+  * the assembly pose maps the measured hinge bore of the monitor onto the base's,
+    and every tilt step is checked for interference by mesh intersection.
 
 Usage (from repo root):  python tools/generate_svg_preview.py
 """
@@ -210,168 +211,6 @@ def bbox2(p):
     return x0, y0, x1, y1, x1 - x0, y1 - y0, (x0 + x1) / 2, (y0 + y1) / 2
 
 
-def measure(head, base, knob):
-    M = {}
-    for name, m in (('head', head), ('base', base), ('knob', knob)):
-        M[name] = dict(lo=m.bounds[0], hi=m.bounds[1], ext=m.extents,
-                       vol=m.volume / 1000.0, area=m.area / 100.0,
-                       shells=len(m.split(only_watertight=False)), watertight=m.is_watertight,
-                       faces=len(m.faces))
-    H = M['head']
-    hz0 = H['lo'][2]
-
-    # Head: front silhouette holes = see-through openings (screen window, joystick)
-    front = Projection([head], VIEWS['front']).silhouette(0)
-    hs = holes(front)
-    H['screen'] = bbox2(hs[0])
-    H['joy'] = bbox2(hs[1])
-    # Front bezel lip: probe just behind the front face
-    xs = ray_hits(head, np.array([-200.0, 1.5, 32.0]), [1, 0, 0])
-    H['bez_x'] = (xs[0] - 200.0, xs[-1] - 200.0)
-    zs = ray_hits(head, np.array([-20.0, 1.5, -50.0]), [0, 0, 1])
-    H['bez_z'] = (zs[0] - 50.0, zs[-1] - 50.0)
-    # Cabinet body behind the bezel: probe at mid depth
-    xs = ray_hits(head, np.array([-200.0, 13.0, 56.0]), [1, 0, 0])
-    H['cab_x'] = (xs[0] - 200.0, xs[-1] - 200.0)
-    H['side_wall'] = xs[1] - xs[0]
-    ys = ray_hits(head, np.array([0.0, -50.0, 56.0]), [0, 1, 0])
-    H['cab_y'] = (ys[0] - 50.0, None)
-    H['front_wall'] = ys[1] - ys[0]
-    zs = ray_hits(head, np.array([-20.0, 22.0, -50.0]), [0, 0, 1])
-    H['cab_z'] = (zs[0] - 50.0, zs[-1] - 50.0)
-    H['bottom_wall'] = zs[1] - zs[0]
-    H['top_wall'] = zs[-1] - zs[-2]
-    # Rear opening (slide-in pocket): section just inside the back face
-    rear_y = H['hi'][1] - 0.3
-    rear = section(head, [0, rear_y, 0], [0, 1, 0], (1, 0, 0), (0, 0, 1))
-    H['pocket'] = bbox2(holes(rear)[0])
-    H['cab_y'] = (H['cab_y'][0], H['hi'][1])
-    # Pocket front stop (Wio rests against the inside of the front wall)
-    ys2 = ray_hits(head, np.array([0.0, 200.0, 56.0]), [0, -1, 0])
-    H['pocket_front_y'] = 200.0 - ys2[0]
-    H['pocket_depth'] = H['hi'][1] - H['pocket_front_y']
-    # Dials: section through the bosses in front of the face
-    dials = parts(section(head, [0, -0.5, 0], [0, 1, 0], (1, 0, 0), (0, 0, 1)))
-    H['dials'] = sorted([bbox2(d) for d in dials], key=lambda b: -b[7])
-    H['dial_proud'] = -H['lo'][1]
-    # Top button slot: ray probes through the roof along x=0
-    zr = H['cab_z'][1] - 1.0
-    ys3 = ray_hits(head, np.array([0.0, -50.0, zr]), [0, 1, 0])
-    xs3 = ray_hits(head, np.array([-200.0, (ys3[1] + ys3[2]) / 2 - 50.0, zr]), [1, 0, 0])
-    sy0, sy1 = ys3[1] - 50.0, ys3[2] - 50.0
-    sx0, sx1 = xs3[1] - 200.0, xs3[2] - 200.0
-    H['btn_slot'] = (sx0, sy0, sx1, sy1, sx1 - sx0, sy1 - sy0, (sx0 + sx1) / 2, (sy0 + sy1) / 2)
-    # Antenna: ball tips from a slice through the ball equators (top - ball radius)
-    ball_r = None
-    for dz in np.arange(0.6, 4.0, 0.1):          # widest slice = ball equator
-        sl = parts(section(head, [0, 0, H['hi'][2] - dz], [0, 0, 1], (1, 0, 0), (0, 1, 0)))
-        if len(sl) == 2 and (ball_r is None or bbox2(sl[0])[4] / 2 > ball_r + 1e-3):
-            ball_r = bbox2(sl[0])[4] / 2
-            tips = sl
-    H['ant'] = sorted([bbox2(e) for e in tips], key=lambda b: b[6])
-    H['ant_ball_d'] = 2 * ball_r
-    H['ant_top'] = H['hi'][2]
-    H['ant_span'] = H['ant'][1][6] - H['ant'][0][6]
-    # Web between the screen window and the joystick hole (thinnest front-face bridge)
-    H['web'] = H['joy'][0] - H['screen'][2]
-    # Type-C: section through the left wall
-    lw = H['cab_x'][0] + H['side_wall'] / 2
-    tc = section(head, [lw, 0, 0], [1, 0, 0], (0, 1, 0), (0, 0, 1))
-    H['typec'] = bbox2(holes(tc)[0]) if holes(tc) else bbox2(
-        sorted(parts(tc), key=lambda p: p.bounds[1])[0])
-    # Pivot lug: section on the centre plane x=0 below the cabinet
-    lug = section(head, [0, 0, 0], [1, 0, 0], (0, 1, 0), (0, 0, 1))
-    lug_h = [bbox2(h) for h in holes(lug) if h.bounds[3] < H['cab_z'][0] + 0.01]
-    piv = min(lug_h, key=lambda b: b[4])
-    H['pivot'] = (0.0, piv[6], piv[7])
-    H['pivot_d'] = piv[4]
-    xs = ray_hits(head, np.array([-200.0, piv[6], hz0 + 0.8]), [1, 0, 0])
-    H['lug_w'] = xs[-1] - xs[0]
-    yz = section(head, [0, 0, hz0 + 0.8], [0, 0, 1], (1, 0, 0), (0, 1, 0))
-    H['lug_r'] = H['pivot'][2] - hz0
-
-    B = M['base']
-    ys = ray_hits(base, np.array([0.0, -200.0, 1.0]), [0, 1, 0])
-    xs_plate = ray_hits(base, np.array([-200.0, 30.0, 3.5]), [1, 0, 0])
-    B['plate_x'] = (xs_plate[0] - 200.0, xs_plate[-1] - 200.0)
-    zs = ray_hits(base, np.array([-25.0, 25.0, 50.0]), [0, 0, -1])
-    B['plate_top'] = 50.0 - zs[0]
-    B['deck'] = zs[1] - zs[0]
-    zr = ray_hits(base, np.array([0.0, 25.0, 50.0]), [0, 0, -1])
-    B['rib_full'] = zr[-1] - zr[0]
-    # Arms: probe across X at mid arm height
-    zm = (B['plate_top'] + B['hi'][2]) / 2 - 3
-    xa = ray_hits(base, np.array([-200.0, 0.0, zm]), [1, 0, 0])
-    xa = [x - 200.0 for x in xa]
-    B['arm_l'] = (xa[0], xa[1])
-    B['arm_r'] = (xa[-2], xa[-1])
-    B['gap'] = xa[2] - xa[1] if len(xa) == 4 else None
-    ya = ray_hits(base, np.array([-8.35, -200.0, zm]), [0, 1, 0])
-    B['arm_y'] = (ya[0] - 200.0, ya[-1] - 200.0)
-    # Pivot hole: section through the right arm
-    rs = section(base, [(B['arm_r'][0] + B['arm_r'][1]) / 2, 0, 0], [1, 0, 0], (0, 1, 0), (0, 0, 1))
-    ph = bbox2(holes(rs)[0])
-    B['pivot'] = (0.0, ph[6], ph[7])
-    B['pivot_d'] = ph[4]
-    B['arm_r_round'] = B['hi'][2] - ph[7]
-    # Nut trap / counterbore: sections in the outer skins
-    nl = section(base, [B['arm_l'][0] + 0.3, 0, 0], [1, 0, 0], (0, 1, 0), (0, 0, 1))
-    B['hex'] = bbox2(holes(nl)[0])
-    B['hex_depth'] = ray_hits(base, np.array([-200.0, ph[6] + 2.4, ph[7]]), [1, 0, 0])[0] - 200.0 - B['arm_l'][0]
-    cr = section(base, [B['arm_r'][1] - 0.3, 0, 0], [1, 0, 0], (0, 1, 0), (0, 0, 1))
-    B['cbore_d'] = bbox2(holes(cr)[0])[4]
-    cb = ray_hits(base, np.array([200.0, ph[6] + 2.5, ph[7]]), [-1, 0, 0])
-    B['cbore_depth'] = B['arm_r'][1] - (200.0 - cb[0])
-    # Underside: pocket, ribs, foot recesses
-    und = section(base, [0, 0, 0.5], [0, 0, 1], (1, 0, 0), (0, 1, 0))
-    hs = holes(und)
-    B['feet'] = sorted([bbox2(h) for h in hs if h.area < 100], key=lambda b: (b[7], b[6]))
-    B['pockets'] = [bbox2(h) for h in hs if h.area >= 100]
-    pk = unary_union([h for h in hs if h.area >= 100])
-    B['pocket_env'] = bbox2(pk.envelope)
-    pxs = sorted(B['pockets'], key=lambda b: b[0])
-    B['rib_w'] = pxs[-1][0] - pxs[0][2]
-    # Foot pads: only count recesses that actually exist in the mesh (they may fall inside the pocket)
-    B['foot_depth'] = None
-    if B['feet']:
-        fz = ray_hits(base, np.array([B['feet'][0][6], B['feet'][0][7], -10.0]), [0, 0, 1])
-        B['foot_depth'] = fz[0] - 10.0
-    # Contact area with the desk (z = 0 face)
-    B['contact'] = und.area
-
-    K = M['knob']
-    ks = section(knob, [0, 0, 0.3], [0, 0, 1], (1, 0, 0), (0, 1, 0))
-    K['hex'] = bbox2(holes(ks)[0])
-    km = section(knob, [0, 0, 5.0], [0, 0, 1], (1, 0, 0), (0, 1, 0))
-    K['bore'] = bbox2(holes(km)[0])[4]
-    kz = ray_hits(knob, np.array([0.0, 6.0, 50.0]), [0, 0, -1])
-    K['collar_h'] = K['hi'][2] - (50.0 - kz[0]) if kz else None
-    K['body_h'] = 50.0 - kz[0]
-    kc = section(knob, [0, 0, K['hi'][2] - 0.3], [0, 0, 1], (1, 0, 0), (0, 1, 0))
-    K['collar_d'] = bbox2(parts(kc)[0])[4]
-    K['ridges'] = 12
-    hd = ray_hits(knob, np.array([0.0, 2.6, -10.0]), [0, 0, 1])
-    K['hex_depth'] = hd[0] - 10.0
-    return M
-
-
-def head_pose(M, tilt_deg):
-    """4x4 transform taking head coordinates to the assembled pose (pivot on pivot, tilted back)."""
-    hp, bp = np.array(M['head']['pivot']), np.array(M['base']['pivot'])
-    return trimesh.transformations.rotation_matrix(math.radians(-tilt_deg), [1, 0, 0], bp) @         trimesh.transformations.translation_matrix(bp - hp)
-
-
-def assemble(head, base, knob, M, tilt_deg):
-    """Head pivot onto base pivot, tilted back by tilt_deg; knob on the -X arm face."""
-    bp = np.array(M['base']['pivot'])
-    h = head.copy()
-    h.apply_transform(head_pose(M, tilt_deg))
-    k = knob.copy()
-    k.apply_transform(trimesh.transformations.rotation_matrix(math.radians(-90), [0, 1, 0]))  # +Z -> -X
-    k.apply_translation([M['base']['arm_l'][0], bp[1], bp[2]])
-    return h, base.copy(), k
-
-
 # ------------------------------------------------------------------------------
 # SVG helpers
 # ------------------------------------------------------------------------------
@@ -382,8 +221,10 @@ CEN = '#f87171'
 ACC = '#f59e0b'
 OK = '#34d399'
 BAD = '#f43f5e'
-FILL = {'head': '#1e293b', 'base': '#172235', 'knob': '#3b2a12'}
-SHADE = {'head': (236, 230, 216), 'base': (88, 96, 110), 'knob': (200, 150, 80)}
+FILL = {'head': '#1e293b', 'cover': '#1a2638', 'base': '#172235', 'bottom': '#14202f', 'panel': '#111827',
+        'knob': '#26303f'}
+SHADE = {'head': (236, 232, 222), 'cover': (226, 222, 211), 'base': (236, 232, 222), 'bottom': (215, 211, 200),
+         'panel': (52, 56, 62), 'knob': (62, 66, 72)}
 
 
 def f1(x):
@@ -521,25 +362,171 @@ def view_label(cv, x, y, s):
 # ------------------------------------------------------------------------------
 # Drawing
 # ------------------------------------------------------------------------------
+PARTS = ['head', 'rear_cover', 'base', 'bottom_cover', 'front_panel', 'knob']
+NAMES = {'head': '显示器前壳', 'rear_cover': 'CRT 后盖', 'base': '主机盒', 'bottom_cover': '底盖',
+         'front_panel': '正面面板', 'knob': '阻尼旋钮'}
+KINDS = ['head', 'cover', 'base', 'bottom', 'panel', 'knob']
+
+
+def load_parts():
+    return {n: trimesh.load(f'{STL_DIR}/wio_tilt_tv_{n}.stl') for n in PARTS}
+
+
+def x_bore(mesh, x, near, max_d=6.0):
+    """Centre (y, z) and diameter of the round hole in the section x = const nearest a point."""
+    sec = section(mesh, [x, 0, 0], [1, 0, 0], (0, 1, 0), (0, 0, 1))
+    hs = [bbox2(h) for h in holes(sec) if bbox2(h)[4] < max_d]
+    best = min(hs, key=lambda b: math.hypot(b[6] - near[0], b[7] - near[1]))
+    return best[6], best[7], (best[4] + best[5]) / 2
+
+
+def measure(P):
+    M = {}
+    for n, m in P.items():
+        M[n] = dict(lo=m.bounds[0], hi=m.bounds[1], ext=m.extents, vol=m.volume / 1000.0,
+                    shells=len(m.split(only_watertight=False)), watertight=m.is_watertight)
+    H, C, B, BC, FP, K = (M[n] for n in PARTS)
+    head, cover, base, bot, panel_m, knob = (P[n] for n in PARTS)
+
+    # Head: see-through openings in the front view (screen window, joystick)
+    hs = holes(Projection([head], VIEWS['front']).silhouette(0))
+    H['screen'], H['joy'] = bbox2(hs[0]), bbox2(hs[1])
+    H['web'] = H['joy'][0] - H['screen'][2]
+    H['dials'] = sorted([bbox2(d) for d in parts(section(head, [0, -1.0, 0], [0, 1, 0], (1, 0, 0), (0, 0, 1)))
+                         if bbox2(d)[4] > 5], key=lambda b: -b[7])
+    xs = ray_hits(head, np.array([-200.0, 13.0, 40.0]), [1, 0, 0])
+    H['body_w'] = xs[-1] - xs[0]
+    H['side_wall'] = xs[1] - xs[0]
+    zs = ray_hits(head, np.array([-20.0, 1.5, -50.0]), [0, 0, 1])
+    H['bezel_z'] = (zs[0] - 50.0, zs[-1] - 50.0)
+    ys = ray_hits(head, np.array([0.0, -50.0, 56.0]), [0, 1, 0])
+    H['front_wall'] = ys[1] - ys[0]
+    H['pocket_front_y'] = ys[1] - 50.0
+    rear = section(head, [0, 25.7, 0], [0, 1, 0], (1, 0, 0), (0, 0, 1))
+    H['pocket'] = bbox2(holes(rear)[0])
+    # Probe the side wall (outside the open-backed pocket) for the body's back face
+    H['body_back_y'] = 200.0 - ray_hits(head, np.array([H['lo'][0] + 3.5, 200.0, 40.0]), [0, -1, 0])[0]
+    # Floor openings (section through the 2mm floor)
+    fl = sorted([bbox2(h) for h in holes(section(head, [0, 0, 2.0], [0, 0, 1], (1, 0, 0), (0, 1, 0)))],
+                key=lambda b: -b[4] * b[5])
+    H['port_slot'] = fl[0]
+    H['wire_holes'] = sorted(fl[1:3], key=lambda b: b[6])
+    # Hinge: bore in the tail knuckle, tail width
+    hy, hz, hd = x_bore(head, 0.0, (H['hi'][1] - 4.0, H['lo'][2] + 4.0))
+    H['axis'], H['bore_d'] = (0.0, hy, hz), hd
+    xs = ray_hits(head, np.array([-200.0, hy, hz + 3.0]), [1, 0, 0])
+    H['tail_w'] = xs[-1] - xs[0]
+    H['knuckle_r'] = hz - H['lo'][2]
+
+    # Rear cover
+    C['depth'] = C['hi'][1] - H['body_back_y']
+    C['vents'] = len(holes(section(cover, [0, C['hi'][1] - 0.6, 0], [0, 1, 0], (1, 0, 0), (0, 0, 1))))
+
+    # Base
+    B['top'] = 100.0 - ray_hits(base, np.array([-40.0, -50.0, 100.0]), [0, 0, -1])[0]
+    B['step'] = 100.0 - ray_hits(base, np.array([25.0, 5.0, 100.0]), [0, 0, -1])[0]
+    # Knuckles: the bore section on a plane through the right knuckle, near the top rear
+    xs = [x - 200.0 for x in ray_hits(base, np.array([-200.0, 0.0, B['step'] + 9.5]), [1, 0, 0])]
+    kn = [x for x in xs if abs(x) < 20]
+    B['knuckles'] = tuple(kn[:4])
+    B['gap'] = kn[2] - kn[1]
+    by, bz, bd = x_bore(base, (kn[2] + kn[3]) / 2, (0.0, B['step'] + 6.0))
+    B['axis'], B['bore_d'] = (0.0, by, bz), bd
+    xs = [x - 200.0 for x in ray_hits(base, np.array([-200.0, by + 6.0, B['step'] + 3.0]), [1, 0, 0])]
+    B['bay'] = (xs[1], xs[-2])
+    # Top-plate openings (clip off the hinge-bay end so the tail slot reads as a closed opening)
+    top_sec = section(base, [0, 0, B['top'] - 1.0], [0, 0, 1], (1, 0, 0), (0, 1, 0))
+    clip = Polygon([(-60, -80), (60, -80), (60, by - 10.5), (-60, by - 10.5)])
+    gaps = top_sec.convex_hull.intersection(clip).difference(top_sec)
+    tops = sorted([bbox2(g) for g in parts(gaps) if g.area > 20.0], key=lambda b: (b[7], b[6]))
+    B['top_holes'] = tops
+    fw = holes(section(base, [0, base.bounds[0][1] + 1.0, 0], [0, 1, 0], (1, 0, 0), (0, 0, 1)))
+    B['window'] = bbox2(fw[0])
+    B['grille'] = len(holes(section(base, [base.bounds[0][0] + 1.0, 0, 0], [1, 0, 0], (0, 1, 0), (0, 0, 1))))
+    B['vents'] = len(holes(section(base, [base.bounds[1][0] - 1.0, 0, 0], [1, 0, 0], (0, 1, 0), (0, 0, 1))))
+    cb = ray_hits(base, np.array([-30.0, by + 2.4, bz]), [1, 0, 0])      # from inside the hinge bay
+    B['cbore_depth'] = cb[0] - 30.0 - B['knuckles'][0]
+
+    # Bottom cover: battery bay and standoffs from a slice above the plate
+    sl = section(bot, [0, 0, BC['lo'][2] + 3.5], [0, 0, 1], (1, 0, 0), (0, 1, 0))
+    BC['bay'] = bbox2(holes(sl)[0])
+    posts = [bbox2(p) for p in parts(sl) if bbox2(p)[4] < 8]
+    BC['posts'] = sorted(posts, key=lambda b: (b[7], b[6]))
+    BC['post_pitch'] = min(abs(a[6] - b[6]) for a in posts for b in posts if abs(a[6] - b[6]) > 1)
+    BC['feet'] = len([h for h in holes(section(bot, [0, 0, 0.3], [0, 0, 1], (1, 0, 0), (0, 1, 0))) if h.area > 50])
+    BC['plate_t'] = 100.0 - ray_hits(bot, np.array([30.0, -40.0, 100.0]), [0, 0, -1])[0]
+
+    # Front panel cut-outs, matched to the generator's port names by position
+    import generate_3d_models as G
+    ph = [bbox2(h) for h in holes(Projection([panel_m], VIEWS['front']).silhouette(0))]
+    names = list(G.FRONT_PORTS) + [('LED', G.FRONT_LED[0], G.FRONT_LED[1], 0, 0, 0)]
+    FP['ports'] = []
+    for b in sorted(ph, key=lambda b: b[6]):
+        n = min(names, key=lambda p: math.hypot(p[1] - b[6], p[2] - b[7]))[0]
+        FP['ports'].append((n, b))
+
+    K['bore'] = bbox2(holes(section(knob, [0, 0, 5.0], [0, 0, 1], (1, 0, 0), (0, 1, 0)))[0])[4]
+    K['hex'] = bbox2(holes(section(knob, [0, 0, 0.3], [0, 0, 1], (1, 0, 0), (0, 1, 0)))[0])
+    K['hex_depth'] = ray_hits(knob, np.array([0.0, 2.4, -10.0]), [0, 0, 1])[0] - 10.0
+    return M
+
+
+def pose_from(M, tilt_deg):
+    """Head / rear cover -> assembled pose: measured head bore onto measured base bore, tilted back."""
+    T = trimesh.transformations.translation_matrix(np.subtract(M['base']['axis'], M['head']['axis']))
+    return trimesh.transformations.rotation_matrix(math.radians(-tilt_deg), [1, 0, 0], M['base']['axis']) @ T
+
+
+def assembly(P, M, tilt_deg):
+    import generate_3d_models as G
+    T = pose_from(M, tilt_deg)
+    h, c = P['head'].copy(), P['rear_cover'].copy()
+    h.apply_transform(T)
+    c.apply_transform(T)
+    k = P['knob'].copy()
+    k.apply_transform(G.knob_pose())
+    return [h, c, P['base'].copy(), P['bottom_cover'].copy(), P['front_panel'].copy(), k]
+
+
+def inter_vol(a, b):
+    i = trimesh.boolean.intersection([a, b], engine='manifold')
+    return i.volume if len(i.faces) else 0.0
+
+
+def table(cv, x, y, title, rows, kw=110):
+    cv.text(x, y, title, 12, '#7dd3fc', weight='bold')
+    for i, (k_, v_) in enumerate(rows):
+        cv.text(x, y + 22 + i * 19, k_, 11, '#94a3b8')
+        cv.text(x + kw, y + 22 + i * 19, v_, 10.5, INK)
+
+
 def build():
-    head = trimesh.load(f'{STL_DIR}/wio_tilt_tv_head.stl')
-    base = trimesh.load(f'{STL_DIR}/wio_tilt_tv_base.stl')
-    knob = trimesh.load(f'{STL_DIR}/wio_tilt_tv_knob.stl')
-    M = measure(head, base, knob)
-    H, B, K = M['head'], M['base'], M['knob']
+    P = load_parts()
+    M = measure(P)
+    H, C, B, BC, FP, K = (M[n] for n in PARTS)
 
-    # Assembly checks
-    tilt_samples = [0, 15, 30, 45]
+    # ---------------- assembly checks ----------------
+    tilts = list(range(0, 50, 5))
     clash = {}
-    for t in tilt_samples:
-        h, b, _ = assemble(head, base, knob, M, t)
-        inter = trimesh.boolean.intersection([h, b], engine='manifold')
-        clash[t] = (inter.volume if len(inter.faces) else 0.0, inter)
-    bp = np.array(B['pivot'])
-    pivot_to_cab = H['pivot'][2] - H['cab_z'][0] if False else H['cab_z'][0] - H['pivot'][2]
-    clash_mm = B['arm_r_round'] - pivot_to_cab
+    for t in tilts:
+        A = assembly(P, M, t)
+        clash[t] = sum(inter_vol(mv, ms) for mv in A[:2] for ms in A[2:])
+    A0 = assembly(P, M, 0)
+    A45 = assembly(P, M, 45)
+    static_pairs = [('盒/底盖', 2, 3), ('盒/面板', 2, 4), ('底盖/面板', 3, 4), ('盒/旋钮', 2, 5)]
+    static_clash = {n: inter_vol(A0[i], A0[j]) for n, i, j in static_pairs}
+    v = A0[0].vertices
+    v = v[(np.abs(v[:, 0]) > 8.0) & (v[:, 1] < B['axis'][1] - 10.0)]     # monitor floor, excluding the tail
+    rest_gap = v[:, 2].min() - B['top']
+    knob_clear = A0[5].bounds[0][2] - B['step']
+    tail_side = (B['gap'] - H['tail_w']) / 2
+    # Bolt: from the counterbore floor (left knuckle) to the far face of the knob's nut pocket
+    bolt = (A0[5].bounds[0][0] + K['hex_depth']) - (B['knuckles'][0] + B['cbore_depth'])
+    vols = [m.volume for m in A45[:5]]
+    com45 = sum(m.center_mass * m.volume for m in A45[:5]) / sum(vols)
+    foot = (P['base'].bounds[0][1], P['base'].bounds[1][1])
 
-    W, HH = 1800, 1320
+    W, HH = 1800, 1420
     cv = Canvas()
     cv.add(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {HH}" width="{W}" height="{HH}" '
            f'font-family="Consolas, \'Microsoft YaHei\', \'PingFang SC\', monospace">')
@@ -548,316 +535,232 @@ def build():
            '<pattern id="g" width="20" height="20" patternUnits="userSpaceOnUse">'
            '<path d="M20 0H0V20" fill="none" stroke="#111a2b" stroke-width="0.6"/></pattern></defs>')
     cv.add(f'<rect width="{W}" height="{HH}" fill="#0a0f1d"/><rect width="{W}" height="{HH}" fill="url(#g)"/>')
+    cv.text(28, 40, 'WIO TERMINAL 复古桌面显示器 — STL 实测视图 / 装配 / 扩展预留', 22, '#f8fafc', weight='bold')
+    cv.text(28, 62, '单位 mm  |  各视图观察方向见图名  |  轮廓 = STL 网格边投影 + z-buffer 消隐（实线可见 / 虚线隐藏）  |  '
+                    '尺寸 = 网格截面 / 射线实测', 11.5, '#94a3b8')
+    cv.text(28, 80, 'source: cad/stl/wio_tilt_tv_*.stl（6 个零件） — regenerate: python tools/generate_3d_models.py ; '
+                    'python tools/generate_svg_preview.py', 11, '#475569')
 
-    # Title block
-    cv.text(28, 40, 'WIO TERMINAL 可俯仰复古小电视 — STL 实测三视图 / 装配图', 22, '#f8fafc', weight='bold')
-    cv.text(28, 62, f'DWG WT-TILT-TV REV4  |  单位 mm  |  各视图观察方向见图名  |  所有轮廓 = STL 网格边投影 + z-buffer 消隐'
-                    f'（实线可见 / 虚线隐藏）  |  所有尺寸 = 网格截面/射线实测', 11.5, '#94a3b8')
-    cv.text(28, 80, 'source: cad/stl/wio_tilt_tv_head.stl · wio_tilt_tv_base.stl · wio_tilt_tv_knob.stl  '
-                    '— regenerate: python tools/generate_svg_preview.py', 11, '#475569')
-
-    # ==========================================================================
-    # [A] HEAD  (front / right / top / rear)  scale 2.6
-    # ==========================================================================
-    S = 2.6
-    panel(cv, 20, 96, 1060, 640, '[A]', f'机头 wio_tilt_tv_head.stl',
-          f'外形 {f1(H["ext"][0])} × {f1(H["ext"][1])} × {f1(H["ext"][2])}  |  体积 {H["vol"]:.2f} cm³  |  '
-          f'≈{H["vol"] * DENSITY:.1f} g  |  比例 {S}:1 px/mm')
-
-    # Front view
-    pf = Projection([head], VIEWS['front'])
-    vf = ViewFrame(cv, pf, 190, 0, S)
-    vf.ox = 70 + (-H['lo'][0]) * S + 40
-    vf.oy = 210 + H['hi'][2] * S
+    # ======================= [A] monitor =======================
+    S = 2.4
+    panel(cv, 20, 96, 1060, 610, '[A]', '显示器：前壳 head + CRT 后盖 rear_cover',
+          f'前壳 {f1(H["ext"][0])}×{f1(H["ext"][1])}×{f1(H["ext"][2])} · {H["vol"]:.2f} cm³  |  '
+          f'后盖 {f1(C["ext"][0])}×{f1(C["ext"][1])}×{f1(C["ext"][2])} · {C["vol"]:.2f} cm³  |  比例 {S}:1')
+    head = P['head']
+    vf = ViewFrame(cv, Projection([head], VIEWS['front']), 0, 0, S)
+    vf.ox, vf.oy = 105 - H['lo'][0] * S, 165 + H['hi'][2] * S
     vf.draw(['head'])
-    sw = H['screen']
+    sw, jy = H['screen'], H['joy']
     vf.center(sw[6], sw[7], sw[4] / 2 + 3)
-    jy = H['joy']
     vf.center(jy[6], jy[7], jy[4] / 2 + 3)
-    for d in H['dials']:
-        vf.center(d[6], d[7], d[4] / 2 + 2)
-    cx0, cx1 = H['bez_x']
-    cz0, cz1 = H['bez_z']
-    vf.hdim(cx0, cx1, H['lo'][2] - 9, cz0, cz0, label=f'{f1(cx1 - cx0)}', below=True)
+    bz0, bz1 = H['bezel_z']
+    vf.hdim(H['lo'][0], H['hi'][0], H['lo'][2] - 5, bz0, bz0, label=f1(H['ext'][0]), below=True)
     vf.hdim(sw[0], sw[2], sw[3] + 4, sw[3], sw[3], label=f'窗 {f1(sw[4])}')
-    vf.vdim(sw[1], sw[3], sw[0] - 4, sw[0], sw[0], label=f1(sw[5]), left=True)
-    vf.vdim(cz0, cz1, cx0 - 9, cx0, cx0, label=f1(cz1 - cz0))
-    vf.vdim(H['lo'][2], H['hi'][2], cx0 - 21, 0, H['ant'][0][6], label=f'总高 {f1(H["ext"][2])}')
-    vf.vdim(cz0, sw[1], sw[0] + 6, None, None, label=f1(sw[1] - cz0), left=False)
-    e0, e1 = H['ant']
-    vf.hdim(e0[6], e1[6], H['hi'][2] + 6, H['hi'][2], H['hi'][2], label=f'天线展开 {f1(H["ant_span"])}')
-    vf.hdim(-H['lug_w'] / 2, H['lug_w'] / 2, H['lo'][2] - 3, None, None, label=f'凸耳 {f1(H["lug_w"])}', below=True)
-    vf.note(jy[6] + jy[4] / 2 * 0.7, jy[7] - jy[4] / 2 * 0.7, vf.xy(cx1, 0)[0] + 18, vf.xy(0, jy[7] - 9)[1],
-            f'摇杆孔 Ø{f1(jy[4])}')
+    vf.vdim(sw[1], sw[3], sw[0] - 4, sw[0], sw[0], label=f1(sw[5]))
+    vf.vdim(bz0, bz1, H['lo'][0] - 6, H['lo'][0], H['lo'][0], label=f1(bz1 - bz0))
+    vf.vdim(H['lo'][2], bz1, H['lo'][0] - 17, -H['tail_w'] / 2, H['lo'][0], label=f'含铰链 {f1(bz1 - H["lo"][2])}')
+    vf.note(jy[6] + 3, jy[7] - 3, vf.xy(H['hi'][0], 0)[0] + 14, vf.xy(0, jy[7] - 8)[1], f'摇杆孔 Ø{f1(jy[4])}')
     d0 = H['dials'][0]
-    vf.note(d0[6] + d0[4] / 2 * 0.7, d0[7] + d0[4] / 2 * 0.7, vf.xy(cx1, 0)[0] + 18, vf.xy(0, d0[7] + 9)[1],
-            f'旋钮凸台 Ø{f1(d0[4])} ×2')
-    vf.note(sw[6], sw[7], vf.xy(sw[6], 0)[0] - 30, vf.xy(0, sw[7] + 4)[1], '通透（后部开口）', HID)
-    view_label(cv, vf.xy(0, 0)[0], vf.xy(0, H['lo'][2])[1] + 56, '主视图 FRONT')
+    vf.note(d0[6] + 3, d0[7] + 3, vf.xy(H['hi'][0], 0)[0] + 14, vf.xy(0, d0[7] + 8)[1], f'旋钮凸台 Ø{f1(d0[4])} ×2')
+    vf.note(29.0, 57.5, vf.xy(H['hi'][0], 0)[0] + 14, vf.xy(0, 68)[1], 'RGB 指示点 ×3')
+    view_label(cv, vf.xy(0, 0)[0], vf.xy(0, H['lo'][2])[1] + 44, '主视图 FRONT')
 
-    # Right view (to the right of the front view in 1st-angle = viewed from left; we label explicitly)
-    pr = Projection([head], VIEWS['right'])
+    pr = Projection([head, P['rear_cover']], VIEWS['right'])
     vr = ViewFrame(cv, pr, 0, vf.oy, S)
     vr.ox = 470 - H['lo'][1] * S
-    vr.draw(['head'])
-    py, pz = H['pivot'][1], H['pivot'][2]
-    vr.center(py, pz, H['lug_r'] + 3)
-    vr.hdim(H['lo'][1], H['hi'][1], H['lo'][2] - 9, cz0, cz0, label=f'{f1(H["ext"][1])}', below=True)
-    vr.vdim(H['lo'][2], cz0, H['hi'][1] + 8, None, None, label=f1(cz0 - H['lo'][2]), left=False)
-    vr.vdim(pz, cz0, H['hi'][1] + 20, py, None, label=f1(cz0 - pz), left=False)
-    vr.note(py + 1.3, pz - 1.3, vr.xy(H['hi'][1], 0)[0] + 34, vr.xy(0, pz - 9)[1],
-            f'转轴孔 Ø{f1(H["pivot_d"])} / R{f1(H["lug_r"])}')
-    vr.note(H['pocket_front_y'], 40, vr.xy(H['hi'][1], 0)[0] + 34, vr.xy(0, 44)[1],
-            f'前挡壁 {f1(H["front_wall"])}（虚线=内腔）', HID)
-    view_label(cv, vr.xy(13, 0)[0], vr.xy(0, H['lo'][2])[1] + 56, '右视图 RIGHT (+X)')
+    vr.draw(['head', 'cover'])
+    ax = H['axis']
+    vr.center(ax[1], ax[2], H['knuckle_r'] + 3)
+    vr.hdim(H['lo'][1], H['hi'][1], H['lo'][2] - 5, None, None, label=f1(H['ext'][1]), below=True)
+    vr.hdim(0, H['body_back_y'], bz1 + 5, bz1, bz1, label=f'前壳 {f1(H["body_back_y"])}')
+    vr.hdim(H['body_back_y'], C['hi'][1], bz1 + 5, None, C['hi'][2], label=f'后盖 {f1(C["depth"])}')
+    vr.note(ax[1] + 1.2, ax[2] - 1.2, vr.xy(H['hi'][1], 0)[0] + 16, vr.xy(0, ax[2] - 6)[1],
+            f'铰链孔 Ø{f1(H["bore_d"])} · 尾宽 {f1(H["tail_w"])}')
+    vr.note(H['pocket_front_y'] + 13, 50, vr.xy(H['hi'][1], 0)[0] + 16, vr.xy(0, 56)[1], 'U 形插唇顶住 Wio', HID)
+    view_label(cv, vr.xy(20, 0)[0], vr.xy(0, H['lo'][2])[1] + 44, '右视图 RIGHT（前壳 + 后盖）')
 
-    # Rear view
-    pb = Projection([head], VIEWS['rear'])
-    vb = ViewFrame(cv, pb, 0, vf.oy, S)
-    vb.ox = 830 + H['hi'][0] * S * 0
-    vb.draw(['head'])
+    pc = Projection([P['rear_cover']], VIEWS['rear'])
+    vc = ViewFrame(cv, pc, 900, vf.oy, S)
+    vc.draw(['cover'])
+    vc.hdim(-C['hi'][0], -C['lo'][0], C['lo'][2] - 6, None, None, label=f1(C['ext'][0]), below=True)
+    vc.vdim(C['lo'][2], C['hi'][2], -C['hi'][0] - 6, None, None, label=f1(C['ext'][2]))
+    view_label(cv, vc.xy(0, 0)[0], vc.xy(0, H['lo'][2])[1] + 44, f'后盖后视（{C["vents"]} 道散热槽）')
+
+    pb = Projection([head], VIEWS['bottom'])
+    vb = ViewFrame(cv, pb, vf.ox, 0, S)
+    vb.oy = 475
+    vb.draw(['head'], hidden=False)
+    ps = H['port_slot']
+    vb.hdim(ps[0], ps[2], -ps[1] + 4, -ps[1], -ps[1], label=f'底边接口槽 {f1(ps[4])}×{f1(ps[5])}')
+    wh = H['wire_holes'][1]
+    for w_ in H['wire_holes']:
+        vb.center(w_[6], -w_[7], 3)
+    vb.note(wh[2] - 1, -wh[7], vb.xy(H['hi'][0], 0)[0] + 14, vb.xy(0, -wh[7] + 2)[1], f'40-Pin 走线孔 ×2')
+    vb.note(ps[2] - 2, -ps[7], vb.xy(H['hi'][0], 0)[0] + 14, vb.xy(0, -ps[7] + 9)[1], 'USB-C + 2×Grove 直插向下')
+    view_label(cv, vb.xy(0, 0)[0], vb.xy(0, -H['hi'][1])[1] + 22, '仰视图 BOTTOM（线缆直通主机盒）')
+
     pk = H['pocket']
-    # rear view u = -x
-    vb.hdim(-pk[2], -pk[0], pk[3] - 6, None, None, label=f'插口 {f1(pk[4])}')
-    vb.vdim(pk[1], pk[3], -pk[2] - 4, -pk[2], -pk[2], label=f1(pk[5]))
-    vb.vdim(cz0, pk[1], -pk[0] + 6, None, None, label=f1(pk[1] - cz0), left=False)
-    vb.hdim(-cx1, -pk[2], pk[1] - 5, None, None, label=f1(H['side_wall']), below=True)
-    tcx = H['typec']
-    vb.note(-H['cab_x'][0], tcx[7], vb.xy(-H['cab_x'][0], 0)[0] + 22, vb.xy(0, tcx[7] + 13)[1],
-            f'Type-C {f1(tcx[4])}×{f1(tcx[5])}')
-    view_label(cv, vb.xy(0, 0)[0], vb.xy(0, H['lo'][2])[1] + 56, '后视图 REAR（Wio 从后插入）')
-
-    # Top view under the front view
-    pt = Projection([head], VIEWS['top'])
-    vt = ViewFrame(cv, pt, vf.ox, 0, S)
-    vt.oy = 545 + H['hi'][1] * S
-    vt.draw(['head'])
-    bs = H['btn_slot']
-    vt.hdim(bs[0], bs[2], H['lo'][1] - 5, bs[1], bs[1], label=f'按键槽 {f1(bs[4])}', below=True)
-    vt.vdim(bs[1], bs[3], bs[2] + 4, bs[2], bs[2], label=f1(bs[5]), left=False)
-    vt.vdim(0, H['hi'][1], cx1 + 8, cx1, cx1, label=f1(H['hi'][1]), left=False)
-    for e in H['ant']:
-        vt.center(e[6], e[7], e[4] / 2 + 2)
-    vt.note(H['ant'][1][6] + 1.5, H['ant'][1][7] + 1.5, vt.xy(cx1, 0)[0] + 72, vt.xy(0, 10)[1],
-            f'天线球头 Ø{f1(H["ant_ball_d"])} → 顶 Z{f1(H["ant_top"])}')
-    vt.vdim(H['lo'][1], 0, cx0 - 6, None, cx0, label=f1(-H['lo'][1]))
-    view_label(cv, vt.xy(0, 0)[0], vt.xy(0, H['lo'][1])[1] + 48, '俯视图 TOP')
-
-    # Head feature table
-    tx, ty = 560, 560
-    rows = [
-        ('前框 / 机身', f'{f1(cx1 - cx0)} × {f1(cz1 - cz0)} / {f1(H["cab_x"][1] - H["cab_x"][0])} × '
-                      f'{f1(H["cab_z"][1] - H["cab_z"][0])}，深 {f1(H["hi"][1])}'),
+    table(cv, 600, 500, '显示器实测特征', [
         ('屏幕视窗', f'{f1(sw[4])} × {f1(sw[5])}，中心 X{sw[6]:+.1f} Z{f1(sw[7])}'),
-        ('后插口 (Wio 72×57)', f'{f1(pk[4])} × {f1(pk[5])}，深 {f1(H["hi"][1] - H["pocket_front_y"])}'),
-        ('壁厚 前/侧/顶/底', f'{f1(H["front_wall"])} / {f1(H["side_wall"])} / {f1(H["top_wall"])} / {f1(H["bottom_wall"])}'),
-        ('摇杆孔 / 旋钮凸台', f'Ø{f1(jy[4])} / Ø{f1(d0[4])} ×2 (含指针凸出 {f1(H["dial_proud"])})'),
-        ('天线', f'展开 {f1(H["ant_span"])}，球头 Ø{f1(H["ant_ball_d"])}，顶 Z{f1(H["ant_top"])}'),
-        ('转轴', f'Ø{f1(H["pivot_d"])} @ Y{f1(H["pivot"][1])} Z{f1(H["pivot"][2])}，凸耳宽 {f1(H["lug_w"])}'),
-    ]
-    cv.text(tx, ty, '机头实测特征', 12, '#7dd3fc', weight='bold')
-    for i, (k, v) in enumerate(rows):
-        cv.text(tx, ty + 22 + i * 19, k, 11, '#94a3b8')
-        cv.text(tx + 150, ty + 22 + i * 19, v, 11, INK)
+        ('Wio 插口', f'{f1(pk[4])} × {f1(pk[5])}（Wio 72×57×12），前挡壁 {f1(H["front_wall"])}'),
+        ('侧壁 / 窗-摇杆', f'{f1(H["side_wall"])} / {f1(H["web"])}'),
+        ('底边接口槽', f'{f1(ps[4])} × {f1(ps[5])}（USB-C + 2×Grove）'),
+        ('40-Pin 走线孔', f'{f1(wh[4])} × {f1(wh[5])} ×2'),
+        ('铰链', f'Ø{f1(H["bore_d"])} @ Y{f1(ax[1])} Z{f1(ax[2])}（机身后下方）'),
+    ])
 
-    # ==========================================================================
-    # [B] BASE + KNOB
-    # ==========================================================================
-    S2 = 2.6
-    panel(cv, 20, 748, 1060, 556, '[B]', '底座 wio_tilt_tv_base.stl  +  旋钮 wio_tilt_tv_knob.stl',
-          f'底座 {f1(B["ext"][0])} × {f1(B["ext"][1])} × {f1(B["ext"][2])}，{B["vol"]:.2f} cm³ ≈{B["vol"] * DENSITY:.1f} g  |  '
-          f'旋钮 Ø{f1(K["ext"][0])} × {f1(K["ext"][2])}，{K["vol"]:.2f} cm³  |  比例 {S2}:1')
+    # ======================= [B] base =======================
+    S2 = 2.3
+    panel(cv, 20, 718, 1060, 690, '[B]', '主机盒 base + 底盖 bottom_cover + 正面面板 front_panel + 旋钮 knob',
+          f'主机盒 {f1(B["ext"][0])}×{f1(B["ext"][1])}×{f1(B["ext"][2])} · {B["vol"]:.2f} cm³  |  '
+          f'底盖 {BC["vol"]:.2f} cm³  |  面板 {FP["vol"]:.2f} cm³  |  旋钮 Ø{f1(K["ext"][0])}×{f1(K["ext"][2])}  |  比例 {S2}:1')
+    base, bot = P['base'], P['bottom_cover']
+    kn = A0[5]
+    pbf = Projection([base, bot, P['front_panel'], kn], VIEWS['front'])
+    vbf = ViewFrame(cv, pbf, 105 - B['lo'][0] * S2, 800 + 32 * S2, S2)
+    vbf.draw(['base', 'bottom', 'panel', 'knob'], hidden=False)
+    vbf.hdim(B['lo'][0], B['hi'][0], -6, 0, 0, label=f1(B['ext'][0]), below=True)
+    vbf.vdim(0, B['top'], B['lo'][0] - 6, B['lo'][0], B['lo'][0], label=f1(B['top']))
+    win = B['window']
+    vbf.hdim(win[0], win[2], B['top'] + 4, win[3], win[3], label=f'面板窗 {f1(win[4])}×{f1(win[5])}')
+    view_label(cv, vbf.xy(0, 0)[0], vbf.xy(0, 0)[1] + 40, '主视图 FRONT（装面板 + 底盖）')
 
-    pbf = Projection([base], VIEWS['front'])
-    vbf = ViewFrame(cv, pbf, 70 - B['lo'][0] * S2 + 20, 840 + B['hi'][2] * S2 + 20, S2)
-    vbf.draw(['base'])
-    vbf.center(0, B['pivot'][2], 9)
-    vbf.hdim(B['lo'][0], B['hi'][0], -7, 0, 0, label=f1(B['ext'][0]), below=True)
-    vbf.vdim(0, B['hi'][2], B['lo'][0] - 6, B['lo'][0], B['arm_l'][0], label=f1(B['ext'][2]))
-    vbf.vdim(0, B['pivot'][2], B['lo'][0] + 8, None, -1, label=f'轴高 {f1(B["pivot"][2])}', left=False)
-    vbf.hdim(B['arm_l'][1], B['arm_r'][0], B['hi'][2] + 5, B['hi'][2] - 2, B['hi'][2] - 2,
-             label=f'{f1(B["gap"])}')
-    vbf.hdim(B['arm_l'][0], B['arm_r'][1], B['hi'][2] + 14, B['hi'][2], B['hi'][2],
-             label=f'{f1(B["arm_r"][1] - B["arm_l"][0])}')
-    vbf.vdim(0, B['plate_top'], B['hi'][0] + 6, B['hi'][0], B['hi'][0], label=f1(B['plate_top']), left=False)
-    vbf.note(B['arm_r'][1], B['pivot'][2] + 4, vbf.xy(B['hi'][0], 0)[0] - 10, vbf.xy(0, B['hi'][2] + 3)[1],
-             f'臂厚 {f1(B["arm_r"][1] - B["arm_r"][0])}')
-    view_label(cv, vbf.xy(0, 0)[0], vbf.xy(0, 0)[1] + 50, '主视图 FRONT')
-
-    pbs = Projection([base], VIEWS['right'])
+    pbs = Projection([base, bot, kn], VIEWS['right'])
     vbs = ViewFrame(cv, pbs, 0, vbf.oy, S2)
-    vbs.ox = 330 - B['lo'][1] * S2 + 30
-    vbs.draw(['base'])
-    vbs.center(B['pivot'][1], B['pivot'][2], B['arm_r_round'] + 3)
-    vbs.hdim(B['lo'][1], B['hi'][1], -7, 0, 0, label=f1(B['ext'][1]), below=True)
-    vbs.hdim(B['lo'][1], B['pivot'][1], B['hi'][2] + 6, B['plate_top'], B['hi'][2],
-             label=f'前 {f1(B["pivot"][1] - B["lo"][1])}')
-    vbs.hdim(B['pivot'][1], B['hi'][1], B['hi'][2] + 6, None, B['plate_top'],
-             label=f'后 {f1(B["hi"][1] - B["pivot"][1])}')
-    vbs.note(B['pivot'][1] + 1.2, B['pivot'][2] + 1.2, vbs.xy(B['hi'][1], 0)[0] - 40, vbs.xy(0, B['hi'][2] - 4)[1],
-             f'轴孔 Ø{f1(B["pivot_d"])} · 臂顶 R{f1(B["arm_r_round"])}')
-    vbs.note(B['hi'][1] - 4, B['plate_top'] - 1, vbs.xy(B['hi'][1], 0)[0] - 40, vbs.xy(0, 15)[1],
-             f'底板 {f1(B["plate_top"])}（底腔虚线）', HID)
-    view_label(cv, vbs.xy(6, 0)[0], vbs.xy(0, 0)[1] + 50, '右视图 RIGHT')
+    vbs.ox = 420 - B['lo'][1] * S2
+    vbs.draw(['base', 'bottom', 'knob'], hidden=False)
+    vbs.center(B['axis'][1], B['axis'][2], 7)
+    vbs.hdim(B['lo'][1], B['hi'][1], -6, 0, 0, label=f1(B['ext'][1]), below=True)
+    vbs.vdim(0, B['axis'][2], B['hi'][1] + 6, B['axis'][1], None, label=f'轴高 {f1(B["axis"][2])}', left=False)
+    view_label(cv, vbs.xy(-25, 0)[0], vbs.xy(0, 0)[1] + 40, f'右视图 RIGHT（{B["vents"]} 道竖向散热槽）')
 
-    pbt = Projection([base], VIEWS['top'])
+    S3 = 3.0
+    pfp = Projection([P['front_panel']], VIEWS['front'])
+    vfp = ViewFrame(cv, pfp, 815, vbf.oy - 4 * S3, S3)
+    vfp.draw(['panel'])
+    for i, (n, b) in enumerate(FP['ports']):
+        lx, ly = vfp.xy(b[6], FP['lo'][2])
+        dy = 14 if i % 2 == 0 else 38
+        cv.text(lx, ly + dy, n, 10, ACC, 'middle', 'bold')
+        cv.text(lx, ly + dy + 12, f'{f1(b[4])}×{f1(b[5])}' if n != 'LED' else f'Ø{f1(b[4])}', 9.5, '#94a3b8', 'middle')
+    vfp.hdim(FP['lo'][0], FP['hi'][0], FP['hi'][2] + 3, FP['hi'][2], FP['hi'][2], label=f1(FP['ext'][0]))
+    view_label(cv, vfp.xy(0, 0)[0], vfp.xy(0, FP['hi'][2])[1] - 30, '正面面板（可换）· 默认开孔')
+
+    pbt = Projection([base, kn], VIEWS['top'])
     vbt = ViewFrame(cv, pbt, vbf.ox, 0, S2)
-    vbt.oy = 1000 + B['hi'][1] * S2 + 10
-    vbt.draw(['base'], hidden=False)
-    vbt.cline(B['lo'][0] - 3, B['pivot'][1], B['hi'][0] + 3, B['pivot'][1])
+    vbt.oy = 1010 + B['hi'][1] * S2 + 30
+    vbt.draw(['base', 'knob'], hidden=False)
     vbt.vdim(B['lo'][1], B['hi'][1], B['lo'][0] - 6, B['lo'][0], B['lo'][0], label=f1(B['ext'][1]))
-    vbt.note(B['arm_l'][0], B['pivot'][1] - 2, vbt.xy(B['lo'][0], 0)[0] + 6, vbt.xy(0, B['lo'][1] + 10)[1],
-             f'六角螺母槽 {f1(B["hex"][4])} 深 {f1(B["hex_depth"])}')
-    view_label(cv, vbt.xy(0, 0)[0], vbt.xy(0, B['lo'][1])[1] + 24, '俯视图 TOP')
+    vbt.cline(B['lo'][0] - 3, B['axis'][1], B['hi'][0] + 3, B['axis'][1])
+    th = B['top_holes']
+    big = max(th, key=lambda b: b[4] * b[5])
+    vbt.note(big[2] - 3, big[7], vbt.xy(B['hi'][0], 0)[0] + 10, vbt.xy(0, big[7] + 8)[1], f'走线口 ×{len(th)}')
+    vbt.hdim(B['bay'][0], B['bay'][1], B['hi'][1] + 4, B['hi'][1], B['hi'][1], label=f'铰链槽 {f1(B["bay"][1] - B["bay"][0])}')
+    view_label(cv, vbt.xy(0, 0)[0], vbt.xy(0, B['lo'][1])[1] + 30, '俯视图 TOP')
 
-    pbb = Projection([base], VIEWS['bottom'])
-    vbb = ViewFrame(cv, pbb, 0, vbt.oy, S2)
-    vbb.ox = 455
-    vbb.oy = vbt.oy - (B['hi'][1] + B['lo'][1]) * S2  # same vertical band as the top view
-    vbb.draw(['base'], hidden=False)
-    if B['feet']:
-        ft = B['feet'][0]
-        vbb.hdim(ft[0], ft[2], -ft[3] - 3, None, None, label=f'垫槽 {f1(ft[4])}', below=True)
-    pe = B['pocket_env']
-    vbb.hdim(pe[0], pe[2], -B['hi'][1] - 3, None, None, label=f'减重腔 {f1(pe[4])}×{f1(pe[5])}', below=True)
-    vbb.note(0.0, -B['pivot'][1] - 14, vbb.xy(B['hi'][0], 0)[0] + 4, vbb.xy(0, -B['pivot'][1] - 18)[1],
-             f'十字筋 {f1(B["rib_w"])}', ACC)
-    view_label(cv, vbb.xy(0, 0)[0], vbb.xy(0, -B['hi'][1])[1] + 40, '仰视图 BOTTOM' + (f'（垫槽深 {f1(B["foot_depth"])}）' if B['feet'] else f'（触桌面积 {B["contact"] / 100:.1f} cm²，无独立垫槽）'))
+    pbc = Projection([bot], VIEWS['top'])
+    vbc = ViewFrame(cv, pbc, 0, vbt.oy, S2)
+    vbc.ox = 445 - BC['lo'][0] * S2
+    vbc.draw(['bottom'], hidden=False)
+    bay = BC['bay']
+    vbc.hdim(bay[0], bay[2], bay[3] + 3, bay[3], bay[3], label=f'电池仓 {f1(bay[4])}×{f1(bay[5])}')
+    for p_ in BC['posts']:
+        vbc.center(p_[6], p_[7], 4)
+    view_label(cv, vbc.xy(0, 0)[0], vbc.xy(0, BC['lo'][1])[1] + 30,
+               f'底盖内侧（模块柱 ×{len(BC["posts"])}，间距 {f1(BC["post_pitch"])}）')
 
-    # Knob: top + side
-    S3 = 3.4
-    pkt = Projection([knob], VIEWS['bottom'])
-    vkt = ViewFrame(cv, pkt, 760, 905, S3)
-    vkt.draw(['knob'], hidden=False)
-    vkt.center(0, 0, K['ext'][0] / 2 + 3)
-    vkt.hdim(K['lo'][0], K['hi'][0], K['lo'][1] - 4, None, None, label=f'Ø{f1(K["ext"][0])}', below=True)
-    view_label(cv, vkt.xy(0, 0)[0], vkt.xy(0, K['lo'][1])[1] + 36, f'旋钮底视 · {K["ridges"]} 道防滑筋')
-    vkt.note(K['hex'][2], 0, vkt.xy(K['hi'][0], 0)[0] + 10, vkt.xy(0, 7)[1] - 30,
-             f'六角 {f1(K["hex"][4])}', ACC)
-    pks = Projection([knob], VIEWS['front'])
-    vks = ViewFrame(cv, pks, 960, 935, S3)
-    vks.draw(['knob'])
-    vks.cline(0, -2, 0, K['hi'][2] + 2)
-    vks.vdim(0, K['hi'][2], K['lo'][0] - 4, K['lo'][0], -K['collar_d'] / 2, label=f1(K['ext'][2]))
-    vks.vdim(0, K['body_h'], K['hi'][0] + 4, K['hi'][0], K['hi'][0], label=f1(K['body_h']), left=False)
-    vks.hdim(-K['collar_d'] / 2, K['collar_d'] / 2, K['hi'][2] + 4, K['hi'][2], K['hi'][2],
-             label=f'Ø{f1(K["collar_d"])}')
-    view_label(cv, vks.xy(0, 0)[0], vks.xy(0, 0)[1] + 40, '旋钮侧视（虚线孔）')
-    cv.text(780, 1010, f'内孔 Ø{f1(K["bore"])} · 底部六角穴 {f1(K["hex"][4])}（对边 {f1(K["hex"][5])}）深 {f1(K["hex_depth"])}', 10.5, '#94a3b8')
-    cv.text(780, 1027, f'底座右臂沉孔 Ø{f1(B["cbore_d"])} 深 {f1(B["cbore_depth"])}，左臂六角槽 '
-                       f'{f1(B["hex"][4])} 深 {f1(B["hex_depth"])}', 10.5, '#94a3b8')
+    table(cv, 800, 1010, '扩展预留（实测）', [
+        ('接口面板窗', f'{f1(win[4])} × {f1(win[5])}；面板 {f1(FP["ext"][0])}×{f1(FP["ext"][2])} 从底部插入'),
+        ('顶面走线口', f'{len(th)} 个（Wio 底边接口 / 40-Pin / 铰链尾）'),
+        ('喇叭格栅', f'左侧 {B["grille"]} 孔 + 内侧卡槽（3520 腔体喇叭）'),
+        ('散热槽', f'右侧 {B["vents"]} 道'),
+        ('电池仓', f'{f1(bay[4])} × {f1(bay[5])}（603040 / 503040）'),
+        ('模块柱', f'{len(BC["posts"])} 根 · {f1(BC["post_pitch"])} 网格（Grove 模块 M2）'),
+        ('底盖', f'{BC["plate_t"]:.1f} 厚 · 4 颗 M3 沉头自攻 · 垫槽 ×{BC["feet"]}'),
+        ('铰链', f'孔 Ø{f1(B["bore_d"])} · 叉口 {f1(B["gap"])} · M3×25'),
+    ], kw=82)
 
-    # ==========================================================================
-    # [C] ASSEMBLY
-    # ==========================================================================
-    panel(cv, 1092, 96, 688, 1208, '[C]', '装配 / 俯仰 / 干涉检查',
-          '机头转轴孔对准底座转轴孔（两孔均为实测圆心），绕 X 轴后仰')
-
-    # Iso shaded product view at 20 deg tilt
-    h20, b20, k20 = assemble(head, base, knob, M, 20)
-    piso = Projection([h20, b20, k20], iso_view(-38, 22))
-    Si = 2.8
+    # ======================= [C] assembly =======================
+    panel(cv, 1092, 96, 688, 1312, '[C]', '装配 / 俯仰 / 干涉检查',
+          '显示器绕机身后下方的铰链轴后仰：前沿抬起，不会扫进主机盒')
+    piso = Projection(A0, iso_view(-32, 20))
+    Si = 3.0
     viso = ViewFrame(cv, piso, 0, 0, Si)
     lo, hi = piso.lo, piso.hi
     viso.ox = 1092 + 344 - (lo[0] + hi[0]) / 2 * Si
-    viso.oy = 160 + hi[1] * Si
-    viso.draw_shaded(['head', 'base', 'knob'])
-    cv.text(1110, 160, '等轴测着色（后仰 20°，网格直接渲染）', 11, '#94a3b8')
+    viso.oy = 175 + hi[1] * Si
+    viso.draw_shaded(KINDS)
+    cv.text(1110, 160, '等轴测着色（0°，网格直接渲染）', 11, '#94a3b8')
 
-    # Side view: 0 deg solid + 45 deg ghost + clash highlight
-    h0, b0, k0 = assemble(head, base, knob, M, 0)
-    h45, _, _ = assemble(head, base, knob, M, 45)
-    Ss = 2.7
-    pside = Projection([h0, b0, k0], VIEWS['right'])
-    vs = ViewFrame(cv, pside, 1092 + 300 - 0 * Ss, 0, Ss)
-    vs.ox = 1092 + 344 - ((B['lo'][1] + B['hi'][1]) / 2) * Ss
-    vs.oy = 868
-    pg = Projection([h45], VIEWS['right'])
+    Ss = 2.8
+    pside = Projection(A0, VIEWS['right'])
+    vs = ViewFrame(cv, pside, 0, 0, Ss)
+    vs.ox = 1092 + 330 - ((foot[0] + foot[1]) / 2) * Ss
+    vs.oy = 930
+    pg = Projection(A45[:2], VIEWS['right'])
     vg = ViewFrame(cv, pg, vs.ox, vs.oy, Ss)
-    cv.add(f'<path d="{vg.poly_path(pg.silhouette(0))}" fill="{ACC}" fill-opacity="0.07" stroke="{ACC}" '
+    ghost = unary_union([pg.silhouette(0), pg.silhouette(1)])
+    cv.add(f'<path d="{vg.poly_path(ghost)}" fill="{ACC}" fill-opacity="0.07" stroke="{ACC}" '
            f'stroke-width="1" stroke-dasharray="5 3" fill-rule="evenodd"/>')
-    vs.draw(['head', 'base', 'knob'], hidden=False)
-    for t, ccol in ((0, BAD),):
-        vol, inter = clash[t]
-        if vol > 0:
-            pi = Projection([inter], VIEWS['right'])
-            vi = ViewFrame(cv, pi, vs.ox, vs.oy, Ss)
-            cv.add(f'<path d="{vi.poly_path(pi.silhouette(0))}" fill="{ccol}" stroke="{ccol}" stroke-width="1.5"/>')
-            ib = inter.bounds
-            qx, qy = vs.xy((ib[0][1] + ib[1][1]) / 2, (ib[0][2] + ib[1][2]) / 2)
-            cv.add(f'<circle cx="{qx:.1f}" cy="{qy:.1f}" r="13" fill="none" stroke="{ccol}" stroke-width="1.4"/>')
-            cv.add(f'<polyline points="{qx - 13:.1f},{qy:.1f} {qx - 60:.1f},{qy - 30:.1f} {qx - 150:.1f},{qy - 30:.1f}" '
-                   f'fill="none" stroke="{ccol}" stroke-width="0.8"/>')
-            cv.text(qx - 150, qy - 34, f'干涉 {clash_mm:.2f} mm（{vol:.1f} mm³）', 11, ccol, weight='bold')
-    vs.center(bp[1], bp[2], 10)
-    # arc showing tilt travel of the screen top-front corner
-    top_front = np.array([0, 0, H['cab_z'][1]]) - np.array(H['pivot']) + bp
-    rr = math.hypot(top_front[1] - bp[1], top_front[2] - bp[2])
-    a0 = math.atan2(top_front[2] - bp[2], top_front[1] - bp[1])
-    x0, y0 = vs.xy(bp[1] + rr * math.cos(a0), bp[2] + rr * math.sin(a0))
-    x1, y1 = vs.xy(bp[1] + rr * math.cos(a0 - math.radians(45)), bp[2] + rr * math.sin(a0 - math.radians(45)))
-    cv.add(f'<path d="M{x0:.1f} {y0:.1f}A{rr * Ss:.1f} {rr * Ss:.1f} 0 0 1 {x1:.1f} {y1:.1f}" fill="none" '
+    vs.draw(KINDS, hidden=False)
+    bax = B['axis']
+    vs.center(bax[1], bax[2], 8)
+    fz = A0[0].bounds[1][2]
+    vs.vdim(0, fz, foot[0] - 8, foot[0], None, label=f'总高 {f1(fz)}')
+    vs.vdim(0, bax[2], foot[1] + 8, foot[1], bax[1], label=f'轴高 {f1(bax[2])}', left=False)
+    # Arc traced by the top-front corner of the bezel
+    tf = np.array([0.0, A0[0].bounds[0][1], A0[0].bounds[1][2]])
+    r_ = math.hypot(tf[1] - bax[1], tf[2] - bax[2])
+    a0 = math.atan2(tf[2] - bax[2], tf[1] - bax[1])
+    x0, y0 = vs.xy(bax[1] + r_ * math.cos(a0), bax[2] + r_ * math.sin(a0))
+    x1, y1 = vs.xy(bax[1] + r_ * math.cos(a0 - math.radians(45)), bax[2] + r_ * math.sin(a0 - math.radians(45)))
+    cv.add(f'<path d="M{x0:.1f} {y0:.1f}A{r_ * Ss:.1f} {r_ * Ss:.1f} 0 0 1 {x1:.1f} {y1:.1f}" fill="none" '
            f'stroke="{ACC}" stroke-width="1.2" marker-end="url(#ar)"/>')
-    cv.text(x1 + 6, y1 - 6, '0° → 45°', 11, ACC, weight='bold')
-    total_h = h0.bounds[1][2]
-    vs.vdim(0, total_h, B['lo'][1] - 40, B['lo'][1], H['cab_y'][0] - H['pivot'][1] + bp[1],
-            label=f'装配总高 {f1(total_h)}')
-    vs.vdim(0, bp[2], B['hi'][1] + 6, B['hi'][1], bp[1], label=f'轴高 {f1(bp[2])}', left=False)
-    # tipping margin at 45 deg: centre of mass of head+base vs footprint
-    com45 = (h45.center_mass * h45.volume + base.center_mass * base.volume) / (h45.volume + base.volume)
+    cv.text(x1 + 6, y1 - 4, '0° → 45°', 11, ACC, weight='bold')
     cx_, cy_ = vs.xy(com45[1], com45[2])
     cv.add(f'<circle cx="{cx_:.1f}" cy="{cy_:.1f}" r="4" fill="none" stroke="{OK}" stroke-width="1.5"/>'
            f'<line x1="{cx_:.1f}" y1="{cy_:.1f}" x2="{cx_:.1f}" y2="{vs.xy(0, 0)[1]:.1f}" stroke="{OK}" '
            f'stroke-width="0.8" stroke-dasharray="3 2"/>')
-    margin = B['hi'][1] - com45[1]
-    cv.text(cx_ + 8, cy_ + 4, f'45° 重心 Y{com45[1]:+.1f}', 10.5, OK)
-    view_label(cv, vs.xy(6, 0)[0], vs.oy + 30, '右视装配：实线 0°，橙虚线 45°，红色 = 干涉体')
+    cv.text(cx_ + 8, cy_ - 6, '45° 重心', 10.5, OK)
+    view_label(cv, vs.xy((foot[0] + foot[1]) / 2, 0)[0], vs.oy + 30, '右视装配：实线 0°，橙虚线 45°')
 
-    # Check list
-    cy = 935
+    cy = 1000
     cv.text(1110, cy, '装配实测校核', 13, '#7dd3fc', weight='bold')
     checks = []
-    gap_c = (B['gap'] - H['lug_w']) / 2
-    checks.append((gap_c > 0, f'凸耳 {f1(H["lug_w"])} 入叉口 {f1(B["gap"])}：单侧间隙 {gap_c:.2f}'))
-    checks.append((abs(H['pivot_d'] - B['pivot_d']) < 0.5,
-                   f'转轴孔 机头 Ø{f1(H["pivot_d"])} / 底座 Ø{f1(B["pivot_d"])}（M3 螺栓）'))
-    span = B['arm_r'][1] - B['arm_l'][0]
-    checks.append((True, f'叉臂外宽 {f1(span)} + 旋钮 {f1(K["ext"][2])} = {f1(span + K["ext"][2])}（螺栓长度参考）'))
-    vmax = max(v for v, _ in clash.values())
-    checks.append((vmax < 1e-3, f'机头⇄底座干涉：' + ' / '.join(f'{t}° {clash[t][0]:.1f}mm³' for t in tilt_samples)))
-    checks.append((clash_mm <= 0, f'臂顶圆角 R{f1(B["arm_r_round"])} vs 轴心到机身底面 {f1(pivot_to_cab)}：' +
-                   (f'间隙 {-clash_mm:.2f}' if clash_mm <= 0 else f'重叠 {clash_mm:.2f}')))
-    checks.append((H['web'] >= 0.8, f'屏幕窗 ⇄ 摇杆孔 间隔 {H["web"]:.2f}（嘉立创最小壁厚 0.8）'))
-    checks.append((bool(B['feet']), '底面防滑垫槽：' + (f'{len(B["feet"])} 个' if B['feet'] else
-                                                     '网格中不存在（落入减重腔被吞掉）')))
-    checks.append((margin > 0, f'45° 后仰合重心距后缘 {f1(margin)}（不含 Wio 本体）'))
-    for name, d in (('机头', H), ('底座', B), ('旋钮', K)):
-        checks.append((d['watertight'] and d['shells'] == 1 and max(d['ext']) <= 100,
-                       f'{name}：水密 {"✓" if d["watertight"] else "✗"} · 壳体 {d["shells"]} · '
-                       f'最大边 {f1(max(d["ext"]))} ≤ 100'))
-    jlc = H['vol'] + B['vol']
-    checks.append((jlc <= 70, f'嘉立创免费：机头+底座 {jlc:.2f} cm³ ≤ 70'))
-    for i, (ok, s) in enumerate(checks):
+    vmax = max(clash.values())
+    checks.append((vmax < 1e-3, f'俯仰 0°~45° 每 5° 求交：最大干涉 {vmax:.2f} mm³'))
+    checks.append((all(x < 1e-3 for x in static_clash.values()),
+                   '零件互配 ' + ' · '.join(f'{k_} {x:.1f}' for k_, x in static_clash.items()) + ' mm³'))
+    checks.append((-0.01 <= rest_gap < 1.0, f'0° 显示器底面离盒顶 {rest_gap:.2f}（坐稳不悬空）'))
+    checks.append((tail_side > 0, f'铰链尾 {f1(H["tail_w"])} 入叉口 {f1(B["gap"])}：单侧间隙 {tail_side:.2f}'))
+    checks.append((abs(H['bore_d'] - B['bore_d']) < 0.5, f'铰链孔 显示器 Ø{f1(H["bore_d"])} / 主机盒 Ø{f1(B["bore_d"])}'))
+    checks.append((knob_clear > 0, f'旋钮离铰链槽底 {knob_clear:.2f}'))
+    checks.append((bolt <= 25.0, f'螺栓夹持长度 {bolt:.1f} → M3×25（沉孔 {f1(B["cbore_depth"])} · 螺母穴 {f1(K["hex_depth"])}）'))
+    checks.append((foot[0] < com45[1] < foot[1], f'45° 打印件合重心 Y{com45[1]:+.1f}，底座 Y{foot[0]:.0f}~{foot[1]:+.0f}（不含 Wio）'))
+    checks.append((H['web'] >= 0.8, f'屏幕窗 ⇄ 摇杆孔 间隔 {H["web"]:.2f}（≥0.8）'))
+    for n in PARTS:
+        d = M[n]
+        checks.append((d['watertight'] and d['shells'] == 1,
+                       f'{NAMES[n]}：水密 {"✓" if d["watertight"] else "✗"} · 壳体 {d["shells"]} · '
+                       f'{f1(d["ext"][0])}×{f1(d["ext"][1])}×{f1(d["ext"][2])} · {d["vol"]:.2f} cm³'))
+    total = sum(M[n]['vol'] for n in PARTS)
+    checks.append((True, f'合计 {total:.2f} cm³ ≈ {total * DENSITY:.0f} g（9600 树脂）'))
+    for i, (ok, s_) in enumerate(checks):
         yy = cy + 26 + i * 21
         cv.text(1112, yy, '✓' if ok else '✗', 13, OK if ok else BAD, weight='bold')
-        cv.text(1132, yy, s, 11, INK if ok else '#fda4af')
+        cv.text(1132, yy, s_, 10.5, INK if ok else '#fda4af')
 
     cv.add('</svg>')
-    os.makedirs(os.path.dirname(OUT), exist_ok=True)
     with open(OUT, 'w', encoding='utf-8') as f:
         f.write('\n'.join(cv.out))
 
-    # Print the measurement report for cross-checking
-    for name in ('head', 'base', 'knob'):
-        print(f'--- {name} ---')
-        for k, v in M[name].items():
-            if isinstance(v, (tuple, list, np.ndarray)):
-                v = tuple(round(float(x), 2) if isinstance(x, (int, float, np.floating)) else x for x in np.ravel(v)) \
-                    if not (isinstance(v, list) and v and isinstance(v[0], tuple)) else [tuple(round(x, 2) for x in t) for t in v]
-            elif isinstance(v, float):
-                v = round(v, 3)
-            print(f'  {k:14s} {v}')
-    print('clash mm3:', {t: round(v, 2) for t, (v, _) in clash.items()}, 'overlap', round(clash_mm, 2))
+    for n in PARTS:
+        print(f'--- {n} ---')
+        for k_, v_ in M[n].items():
+            print(f'  {k_:14s} {np.round(v_, 2).tolist() if isinstance(v_, np.ndarray) else v_}')
+    print('clash', {t: round(x, 3) for t, x in clash.items()}, 'static', static_clash)
+    print('rest_gap', round(rest_gap, 3), 'knob_clear', round(knob_clear, 2), 'bolt', round(bolt, 2),
+          'com45', np.round(com45, 1))
     print('wrote', OUT, os.path.getsize(OUT) // 1024, 'KB')
 
 

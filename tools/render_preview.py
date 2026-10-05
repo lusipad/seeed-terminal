@@ -18,12 +18,16 @@ import trimesh
 from PIL import Image, ImageFilter
 
 sys.path.insert(0, os.path.dirname(__file__))
-from generate_svg_preview import STL_DIR, Projection, assemble, head_pose, iso_view, measure  # noqa: E402
+from generate_3d_models import BASE_Y0, FRONT_LED, FRONT_PORTS, PANEL_Y, head_pose, knob_pose  # noqa: E402
+from generate_svg_preview import STL_DIR, Projection, iso_view  # noqa: E402
 
-OUT = 'cad/preview_render.jpg'
-TILT = 15.0
-VIEW = iso_view(-34, 22)
-RES = 0.055                 # mm per supersampled pixel
+SHOTS = [
+    # (output, tilt deg, camera azimuth from front toward +X, elevation)
+    ('cad/preview_render.jpg', 0.0, -32, 20),
+    ('cad/preview_render_back.jpg', 25.0, 140, 24),
+    ('cad/preview_render_jlc.jpg', 0.0, -32, 20),        # JLC free-print 2-part set
+]
+RES = 0.05                  # mm per supersampled pixel
 LIGHT = np.array([-0.45, -0.65, 0.95])
 FILL = np.array([0.8, -0.3, 0.35])
 
@@ -32,13 +36,18 @@ WIO_BOX = ([-36.0, 2.3, 3.5], [36.0, 14.3, 60.5])
 WIO_SCREEN = (-5.0, 32.0, 48.96, 36.72)     # centre x, centre z, active width, height
 
 ALBEDO = {
-    'head': (0.93, 0.90, 0.83),
-    'base': (0.30, 0.32, 0.36),
-    'knob': (0.80, 0.58, 0.27),
+    'shell': (0.93, 0.91, 0.86),
+    'cover': (0.90, 0.88, 0.83),
+    'panel': (0.17, 0.18, 0.20),
+    'knob': (0.22, 0.23, 0.25),
     'wio': (0.10, 0.11, 0.13),
+    'metal': (0.75, 0.76, 0.78),
+    'grove': (0.92, 0.92, 0.90),
+    'led': (0.30, 0.95, 0.45),
     'ground': (0.90, 0.89, 0.86),
 }
-SPEC = {'head': 0.25, 'base': 0.35, 'knob': 0.7, 'wio': 0.4, 'ground': 0.0}
+SPEC = {'shell': 0.25, 'cover': 0.25, 'panel': 0.3, 'knob': 0.4, 'wio': 0.4, 'metal': 0.9, 'grove': 0.2,
+        'led': 0.6, 'ground': 0.0}
 BG_TOP = np.array([0.95, 0.94, 0.92])
 BG_BOT = np.array([0.84, 0.83, 0.80])
 
@@ -64,20 +73,48 @@ def screen_pattern(x, z):
     return col
 
 
-def main():
-    head = trimesh.load(f'{STL_DIR}/wio_tilt_tv_head.stl')
-    base = trimesh.load(f'{STL_DIR}/wio_tilt_tv_base.stl')
-    knob = trimesh.load(f'{STL_DIR}/wio_tilt_tv_knob.stl')
-    M = measure(head, base, knob)
-    h, b, k = assemble(head, base, knob, M, TILT)
-    pose = head_pose(M, TILT)
+def port_standins(y0):
+    """Plain boxes behind the front port cut-outs so the ports read as connectors."""
+    out = []
+    for name, x, z, w, h, _ in FRONT_PORTS:
+        kind = 'metal' if name == 'USB-C' else 'grove' if name.startswith('Grove') else 'panel'
+        out.append((trimesh.creation.box(bounds=[[x - w / 2 + 0.4, y0, z - h / 2 + 0.4],
+                                                 [x + w / 2 - 0.4, y0 + 6.0, z + h / 2 - 0.4]]), kind))
+    lx, lz, lr = FRONT_LED
+    out.append((trimesh.creation.cylinder(radius=lr - 0.1, segment=[[lx, y0, lz], [lx, y0 + 4.0, lz]], sections=24), 'led'))
+    return out
+
+
+def render(OUT, TILT, VIEW):
+    L = lambda n: trimesh.load(f'{STL_DIR}/wio_tilt_tv_{n}.stl')
+    jlc = 'jlc' in OUT
+    pose = head_pose(TILT)
+    if jlc:
+        head = trimesh.load(f'{STL_DIR}/jlc_free/01_jlc_monitor.stl')
+        head.apply_transform(pose)
+    else:
+        head, cover = L('head'), L('rear_cover')
+        head.apply_transform(pose)
+        cover.apply_transform(pose)
+        knob = L('knob')
+        knob.apply_transform(knob_pose())
     wio = trimesh.creation.box(bounds=WIO_BOX)
     stick = trimesh.creation.cylinder(radius=3.2, segment=[[27.0, 2.3, 16.0], [27.0, 0.6, 16.0]], sections=32)
     wio = trimesh.util.concatenate([wio, stick])       # z-buffer only, no boolean needed
     wio.apply_transform(pose)
 
-    objs = [h, b, k, wio]
-    kinds = ['head', 'base', 'knob', 'wio']
+    if jlc:
+        objs = [head, trimesh.load(f'{STL_DIR}/jlc_free/02_jlc_base.stl'), wio]
+        kinds = ['shell', 'shell', 'wio']
+        y0 = BASE_Y0 + 0.6
+    else:
+        objs = [head, cover, L('base'), L('bottom_cover'), L('front_panel'), knob, wio]
+        kinds = ['shell', 'cover', 'shell', 'shell', 'panel', 'knob', 'wio']
+        y0 = PANEL_Y[0] + 0.6
+    WIO_IDX = len(objs) - 1
+    for m, kind in port_standins(y0):
+        objs.append(m)
+        kinds.append(kind)
 
     # Frame: object bounds in view space + margins; ground plane filling the frame
     R = np.array(VIEW, float)
@@ -135,7 +172,7 @@ def main():
 
     # Wio display: emissive where the stand-in's front face shows through the window
     inv = np.linalg.inv(pose)
-    wsel = mi == 3
+    wsel = mi == WIO_IDX
     if wsel.any():
         local = (np.c_[world[wsel], np.ones(wsel.sum())] @ inv.T)[:, :3]
         n_local = nrm[wsel] @ inv[:3, :3].T
@@ -173,6 +210,11 @@ def main():
     im = im.resize((W // 2, H // 2), Image.LANCZOS)
     im.save(OUT, quality=92)
     print('wrote', OUT, im.size, os.path.getsize(OUT) // 1024, 'KB')
+
+
+def main():
+    for out, tilt, az, el in SHOTS:
+        render(out, tilt, iso_view(az, el))
 
 
 if __name__ == '__main__':
