@@ -360,8 +360,10 @@ def build_front_panel():
 # Part 6: hinge friction knob D12 x 8 with a captive M3 nut
 # ==============================================================================
 def build_tilt_tv_knob():
-    body = hull(trimesh.creation.cylinder(radius=6.0, height=6.8, sections=64).apply_translation([0, 0, 3.4]),
-                trimesh.creation.cylinder(radius=5.0, height=0.2, sections=64).apply_translation([0, 0, 7.9]))
+    # 72 facets (5 deg) so the 30 deg flutes land symmetrically between facet vertices - no
+    # micro edges where the flutes meet the chamfer
+    body = hull(trimesh.creation.cylinder(radius=6.0, height=6.8, sections=72).apply_translation([0, 0, 3.4]),
+                trimesh.creation.cylinder(radius=5.0, height=0.2, sections=72).apply_translation([0, 0, 7.9]))
     flutes = []
     for i in range(12):
         a = i * 2 * np.pi / 12
@@ -385,9 +387,23 @@ def knob_pose():
     return trimesh.transformations.translation_matrix([11.7, BASE_AXIS[1], BASE_AXIS[2]]) @ R
 
 
+def clean_mesh(mesh, eps=0.02):
+    """Collapse the micro sliver triangles CSG leaves behind (edges down to ~1e-5mm).
+
+    They are valid for us, but slicers / online checkers (e.g. JLC) merge vertices with a looser
+    tolerance, turn them into degenerate faces and report "反向三角面 / 坏边 / 多壳体".
+    manifold3d's simplify keeps the mesh manifold while removing features smaller than eps.
+    """
+    import manifold3d
+    m = manifold3d.Manifold(manifold3d.Mesh(vert_properties=np.asarray(mesh.vertices, np.float32),
+                                            tri_verts=np.asarray(mesh.faces, np.uint32))).simplify(eps)
+    out = m.to_mesh()
+    return trimesh.Trimesh(np.asarray(out.vert_properties)[:, :3], np.asarray(out.tri_verts))
+
+
 def export_stl(mesh, path):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    mesh.export(path)
+    clean_mesh(mesh).export(path)
     loaded = trimesh.load(path)
     vol_cm3 = loaded.volume / 1000.0
     weight = vol_cm3 * 1.15
